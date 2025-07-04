@@ -27,8 +27,6 @@ from app.services.llm_service import LlmService
 from app.services.rerank_service import RerankService
 from app.services.search_service import SearchService
 
-import asyncio
-
 # Configuration du logger
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -279,75 +277,9 @@ class LangChainService:
 
         self.session_id = int(time.time())
         self.memory = DomainAwareMemory(self.save_dir)
-
-        self.web_agent = None
-        self._init_web_agent()
-
         self.tools = self._create_service_tools()
         self.agent = self._create_agent()
         logger.info("✅ Service LangChain initialisé")
-
-    def _init_web_agent(self):
-        """Initialise le WebAgent"""
-        try:
-            from app.services.web_agent_service import WebAgentService
-            
-            self.web_agent = WebAgentService(
-                llm_service=self.llm_service,
-                search_service=self.search_service,
-                embedding_service=self.embedding_service
-            )
-            
-            logger.info("✅ WebAgent connecté à LangChain")
-            
-        except Exception as e:
-            logger.error(f"❌ Erreur connexion WebAgent: {e}")
-            self.web_agent = None
-
-    async def _async_web_search(self, query: str) -> str:
-        """Recherche web asynchrone"""
-        try:
-            async with self.web_agent as agent:
-                result = await agent.process_query(query)
-                
-                response_text = result.get('response', 'Aucune réponse générée')
-                strategy = result.get('analysis', {}).get('strategy', 'inconnu')
-                web_sources = result.get('web_sources', 0)
-                vector_sources = result.get('vector_sources', 0)
-                
-                # Formater la réponse pour l'agent
-                formatted_response = f"""RECHERCHE WEB EFFECTUÉE:
-
-    {response_text}
-
-    MÉTADONNÉES:
-    - Stratégie utilisée: {strategy}
-    - Sources web trouvées: {web_sources}
-    - Sources juridiques consultées: {vector_sources}
-    - Temps de traitement: {result.get('processing_time', 0):.2f}s
-
-    SOURCES:"""
-                
-                # Ajouter les sources web
-                sources = result.get('sources', {})
-                web_sources_list = sources.get('web', [])
-                if web_sources_list:
-                    formatted_response += "\nSources web:"
-                    for i, source in enumerate(web_sources_list[:3], 1):
-                        formatted_response += f"\n  {i}. {source.get('title', 'Source')} - {source.get('url', '')}"
-                
-                # Ajouter les sources vectorielles
-                vector_sources_list = sources.get('vector', [])
-                if vector_sources_list:
-                    formatted_response += "\nSources juridiques:"
-                    for i, source in enumerate(vector_sources_list[:3], 1):
-                        formatted_response += f"\n  {i}. {source.get('source', 'Document juridique')}"
-                
-                return formatted_response
-                
-        except Exception as e:
-            logger.error(f"Erreur recherche web async: {e}")
-            return f"Erreur lors de la recherche web: {str(e)}"
 
     def _create_service_tools(self) -> List:
         from langchain.tools import Tool
@@ -374,40 +306,8 @@ class LangChainService:
             )
         ]
         logger.info(f"Outils créés: {[tool.name for tool in tools]}")
-        if self.web_agent:
-            web_tool = Tool(
-                name="web_search",
-                func=self._tool_web_search,
-                description="""Recherche des informations récentes sur le web.
-                
-                Utilise cet outil quand:
-                - L'utilisateur demande des informations récentes (2024, 2025, "récent", "nouveau")
-                - La question porte sur des actualités, prix, événements actuels
-                - Les informations de la base juridique semblent insuffisantes
-                - Questions sur des statistiques ou données récentes
-                - Questions sur des événements récents ou tendances actuelles
-                
-                Input: query (string) - la requête de recherche"""
-            )
-            tools.append(web_tool)
-            logger.info("✅ Outil web_search ajouté aux outils existants")
-    
         return tools
 
-    def _tool_web_search(self, query: str) -> str:
-        """Outil de recherche web pour l'agent"""
-        try:
-            if not self.web_agent:
-                return "Service de recherche web non disponible."
-            
-            # Exécution asynchrone
-            result = asyncio.run(self._async_web_search(query))
-            return result
-            
-        except Exception as e:
-            logger.error(f"Erreur _tool_web_search: {e}")
-            return f"Erreur lors de la recherche web: {str(e)}"
-    
     def _tool_search_article(self, article_reference: str) -> str:
         try:
             results = self.search_service.search(f"article {article_reference}", top_k=3)
@@ -483,7 +383,7 @@ class LangChainService:
 
             # Prompt système conversationnel
             system_prompt = """
-Vous êtes LexCam, un assistant expert sur les documents administratifs camerounais. Répondez de manière formelle, précise et engageante, en vous appuyant sur les documents juridiques fournis par la base vectorielle. Intégrez des exemples locaux camerounais (ex. : pratiques à Douala, Yaoundé, ou contextes ruraux comme Bamenda) pour illustrer vos réponses.
+Vous êtes Gov-AI, un assistant conversationnel expert sur le corpus documentaire camerounais. Répondez de manière formelle, précise et engageante, en vous appuyant sur les documents juridiques fournis par la base vectorielle.
 
 ## Directives
 
@@ -493,30 +393,6 @@ Vous êtes LexCam, un assistant expert sur les documents administratifs cameroun
 - **Clarification** : Si la requête est ambiguë ou le contexte insuffisant, demandez poliment des précisions.
 - **Suggestions** : Terminez par une suggestion contextuelle.
 - **Conformité RGPD** : Les données sensibles sont anonymisées par DomainAwareMemory.
-
-
-    COMPORTEMENT :
-- Si vous connaissez le nom de l'utilisateur, commencez la première interaction de la session par un message de bienvenue personnalisé (ex. "Bienvenue, Jean ! Content de vous aider aujourd'hui."). Si le nom n'est pas disponible, utilisez un accueil chaleureux mais général (ex. "Ravi de vous aider aujourd'hui !").
-- Si l'utilisateur mentionne un article ou une loi spécifique, citez son texte exact, puis expliquez-le en termes simples, comme si vous l'expliquiez à quelqu'un qui découvre le sujet.
-- Si l'utilisateur demande un résumé sur un sujet juridique (ex. "Résumez le droit des contrats"), fournissez un aperçu concis et clair du sujet, basé uniquement sur les documents fournis. Structurez le résumé en points clés, adaptés au niveau d'expertise de l'utilisateur, et mentionnez les sources utilisées.
-- Adoptez un ton conversationnel et engageant, sans formalités inutiles, mais restez précis et professionnel.
-- Tenez compte de l'historique de la conversation. Si l'utilisateur a déjà posé une question, répondez directement sans demander "Quelle est votre question ?" et faites un lien naturel avec les échanges précédents (ex. "Vous avez parlé de la constitution tout à l'heure, voici un résumé…").
-- Structurez vos réponses en paragraphes courts ou avec des puces pour que ce soit clair et facile à lire.
-- Adaptez vos explications et résumés au niveau de l'utilisateur : simplifiez pour les débutants, utilisez des termes techniques pour les experts, en devinant leur niveau à partir de leurs questions.
-- Basez-vous UNIQUEMENT sur les documents juridiques fournis. Citez toujours la source exacte (nom du document, article, section ou page) pour les explications et les résumés.
-- Si une information n'est pas dans les documents, dites-le honnêtement (ex. "Désolé, je n'ai pas assez d'infos dans mes sources pour résumer ce sujet, mais je peux aider avec autre chose.").
-- Si un terme juridique est complexe, expliquez-le brièvement en langage courant pour le rendre accessible.
-- Proposez 1 ou 2 questions de suivi pertinentes, mais seulement si c'est la première question de la session ou si l'utilisateur semble vouloir explorer davantage. Évitez les suggestions inutiles dans une conversation avancée.
-- Si l'utilisateur semble inquiet ou utilise des mots comme "stressé" ou "urgent", montrez de l'empathie (ex. "Je vois que c'est préoccupant, on va clarifier ça ensemble.").
-- Si la question est vague, demandez une précision de manière amicale (ex. "Pour bien vous aider, vous parlez de quel aspect du droit ?").
-- Répondez aux salutations (ex. "Bonjour", "Salut") avec un accueil chaleureux mais unique, sans répéter leur salutation (ex. "Content de vous aider aujourd'hui !").
-
-INSTRUCTIONS SPÉCIFIQUES :
-- Pour les résumés, incluez 3 à 5 points clés maximum, en évitant les détails inutiles. Assurez-vous que le résumé est autonome mais invite à poser des questions pour approfondir.
-- Utilisez la langue de l'utilisateur (français par défaut, anglais si détecté).
-- Restez neutre et objectif, mais ajoutez une touche de chaleur pour rendre l'échange agréable.
-- Si c'est la première question de la session, accueillez l'utilisateur avec enthousiasme. Dans une conversation en cours, concentrez-vous sur la continuité et la pertinence.
-- Évitez les réponses génériques ou hors sujet. Assurez-vous que vos réponses et résumés s'appuient sur le contexte de la question et de l'historique.
 
 ## Contexte juridique
 {context}
@@ -653,6 +529,39 @@ Final Answer: [votre réponse formelle avec exemple local si pertinent]
         
         return legal_context
 
+    def debug_source_metadata(self, results: List[Dict]) -> None:
+        """
+        Méthode de debugging pour analyser les métadonnées des sources.
+        À utiliser temporairement pour comprendre la structure des données.
+        """
+        logger.info("🔍 === DEBUG DES MÉTADONNÉES SOURCES ===")
+        
+        for i, result in enumerate(results[:3]):  # Analyser les 3 premiers résultats
+            logger.info(f"📄 Résultat #{i+1}:")
+            logger.info(f"   Type: {type(result)}")
+            logger.info(f"   Clés disponibles: {list(result.keys()) if isinstance(result, dict) else 'N/A'}")
+            
+            if isinstance(result, dict):
+                # Analyser les métadonnées
+                metadata = result.get("metadata", {})
+                logger.info(f"   Métadonnées type: {type(metadata)}")
+                logger.info(f"   Métadonnées clés: {list(metadata.keys()) if isinstance(metadata, dict) else 'N/A'}")
+                
+                # Afficher les valeurs importantes
+                if isinstance(metadata, dict):
+                    for key in ["filename", "source", "document_id", "page_number", "page", "path"]:
+                        if key in metadata:
+                            logger.info(f"   {key}: {metadata[key]} (type: {type(metadata[key])})")
+                
+                # Analyser le score
+                score = result.get("score")
+                logger.info(f"   Score: {score} (type: {type(score)})")
+                
+                # Analyser le texte
+                text = result.get("text", "")
+                logger.info(f"   Texte: {len(text)} caractères")
+        
+        logger.info("🔍 === FIN DEBUG ===")
     def _format_source_documents(self, results: List[Dict]) -> List[Dict]:
         """
         Formate les documents sources pour l'interface utilisateur avec des métadonnées améliorées.
@@ -882,7 +791,39 @@ Final Answer: [votre réponse formelle avec exemple local si pertinent]
                 contextual_instruction = self._process_contextual_references(query, conversation_history)
             
             # Construction du message système conforme au format Llama 3.2
-            system_message = """
+            system_message = """Vous êtes Gov-AI, un assistant conversationnel base sur le corpus documentaire camerounais. Répondez de manière formelle, précise et engageante, en vous appuyant sur les documents administratifs par la base vectorielle.
+
+    COMPORTEMENT :
+- Si vous connaissez le nom de l'utilisateur, commencez la première interaction de la session par un message de bienvenue personnalisé. Si le nom n'est pas disponible, utilisez un accueil chaleureux mais général.
+- Si l'utilisateur mentionne un article ou une loi spécifique, citez son texte exact, puis expliquez-le en termes simples, comme si vous l'expliquiez à quelqu'un qui découvre le sujet.
+- Si l'utilisateur demande un résumé sur un sujet, fournissez un aperçu concis et clair du sujet, basé uniquement sur les documents fournis. Structurez le résumé en points clés, adaptés au niveau d'expertise de l'utilisateur, et mentionnez les sources utilisées.
+- Adoptez un ton conversationnel, engageant, emotionnel, enthousiaste tout en utilisant les emojis sans formalités inutiles, mais restez précis et professionnel.
+- Tenez compte de l'historique de la conversation. Si l'utilisateur a déjà posé une question, répondez directement sans demander "Quelle est votre question ?" et faites un lien naturel avec les échanges précédents (ex. "Vous avez parlé de la constitution tout à l'heure, voici un résumé…").
+- Structurez vos réponses en paragraphes courts ou avec des puces des emojis pour que ce soit clair et facile à lire.
+- Adaptez vos explications et résumés au niveau de l'utilisateur : simplifiez pour les débutants, utilisez des termes techniques pour les experts, en devinant leur niveau à partir de leurs questions.
+- Basez-vous UNIQUEMENT sur le corpus documentaire fournis. Citez toujours la source exacte pour les explications et les résumés.
+- Si une information n'est pas dans les documents, dites-le honnêtement.
+- Si un terme est complexe, expliquez-le brièvement en langage courant pour le rendre accessible.
+- Proposez 1 ou 2 questions de suivi pertinentes, mais seulement si c'est la première question de la session ou si l'utilisateur semble vouloir explorer davantage. Évitez les suggestions inutiles dans une conversation avancée.
+- Si l'utilisateur semble inquiet ou utilise des mots comme "stressé" ou "urgent", montrez de l'empathie.
+- Si la question est vague, demandez une précision de manière amicale .
+- Répondez aux salutations avec un accueil chaleureux mais unique, sans répéter leur salutation (ex. "Content de vous aider aujourd'hui !").
+-Ajouter les emoticônes pour rendre la conversation plus vivante et engageante. Par exemple, utilisez des émojis pour exprimer des émotions, des réactions ou des actions. Cela rendra la conversation plus dynamique et agréable à lire. 😊
+-Sois emotionnel en complimentant les utilisateurs et en leur montrant de l'empathie et en disant a quel point leurs questions sont pertinantes... Par exemple, si un utilisateur pose une question difficile, vous pouvez répondre avec compréhension et encouragement. Cela rendra la conversation plus humaine et engageante. 💖
+-Utilisez des phrases courtes et simples pour rendre la conversation plus fluide et naturelle. Évitez les phrases longues et complexes qui peuvent être difficiles à comprendre. Cela rendra la conversation plus accessible et agréable à lire. 📝
+-Espacez suffisamment les phrases pour éviter que le texte ne soit trop dense. Utilisez des sauts de ligne pour séparer les idées et rendre la lecture plus facile. Cela rendra la conversation plus aérée et agréable à lire. 📖
+-Utilisez des listes à puces pour organiser les informations de manière claire et concise. Cela rendra la conversation plus structurée et facile à suivre. 📋
+-Utilisez des titres et des sous-titres pour structurer la conversation et faciliter la navigation quand la question demande beaucoup de texte. Cela rendra la conversation plus organisée et facile à parcourir. 🗂️
+-Chaque fois que vous utilisez Cameroun ou tout autre mot ou expression camerounais, utilisez le drapeau camerounais 🇨🇲 pour représenter le pays. Cela ajoutera une touche locale et reconnaissable à la conversation. 🌍
+
+
+INSTRUCTIONS SPÉCIFIQUES :
+- Pour les résumés, incluez 3 à 5 points clés maximum, en évitant les détails inutiles. Assurez-vous que le résumé est autonome mais invite à poser des questions pour approfondir.
+- Utilisez la langue de l'utilisateur (français par défaut, anglais si détecté).
+- Restez neutre et objectif, mais ajoutez une touche de chaleur pour rendre l'échange agréable.
+- Si c'est la première question de la session, accueillez l'utilisateur avec enthousiasme. Dans une conversation en cours, concentrez-vous sur la continuité et la pertinence.
+- Évitez les réponses génériques ou hors sujet. Assurez-vous que vos réponses et résumés s'appuient sur le contexte de la question et de l'historique.
+- utiliser les emojis pour rendre la conversations encore plus fluide  et jolie
     """
             
             if contextual_instruction:
@@ -923,6 +864,9 @@ Final Answer: [votre réponse formelle avec exemple local si pertinent]
             logger.info("Génération de la réponse avec le LLM")
             start_time = time.time()
 
+            if search_results:
+                self.debug_source_metadata(search_results)
+            
             if streaming:
                 # Gérer le mode streaming si implémenté
                 logger.info("🔄 Mode streaming activé")
@@ -961,32 +905,6 @@ Final Answer: [votre réponse formelle avec exemple local si pertinent]
                     "success": True
                 }
             
-            if self.web_agent and self._quick_web_check(query):
-                try:
-                    logger.info("🌐 Recherche web détectée comme prioritaire")
-                    web_result = asyncio.run(self._try_web_first(query))
-                    
-                    if web_result and web_result.get("web_search_performed"):
-                        # Ajouter à la mémoire
-                        self.memory.add_user_message(query)
-                        self.memory.add_ai_message(web_result.get("response", ""))
-                        
-                        # Retourner résultat web direct
-                        return {
-                            "query": query,
-                            "response": web_result.get("response", ""),
-                            "source_documents": self._format_web_sources(web_result),
-                            "domains": self._identify_query_intent(query).get("domains", []),
-                            "intent": "web_search",
-                            "session_id": session_id or self.session_id,
-                            "response_time": time.time() - start_time,
-                            "web_enhanced": True,
-                            "web_sources": web_result.get("web_sources", 0),
-                            "strategy_used": "web_priority"
-                        }
-                except Exception as e:
-                 logger.warning(f"Web search failed, falling back to agent: {e}")
-                    
         except Exception as e:
             logger.error(f"Erreur lors de la génération de réponse: {e}")
             return {
@@ -1042,55 +960,6 @@ Final Answer: [votre réponse formelle avec exemple local si pertinent]
             self.session_id = session_id
             self.memory = DomainAwareMemory(self.save_dir, session_id)
 
-    def _quick_web_check(self, query: str) -> bool:
-        """Vérification rapide si web nécessaire"""
-        if not self.web_agent:
-            return False
-        
-        return self.web_agent.needs_web_search(query)
-
-    async def _try_web_first(self, query: str) -> Optional[Dict]:
-        """Tente web en premier pour questions récentes"""
-        try:
-            async with self.web_agent as agent:
-                return await agent.process_query(query)
-        except Exception as e:
-            logger.error(f"Erreur _try_web_first: {e}")
-            return None
-
-    def _format_web_sources(self, web_result: Dict) -> List[Dict]:
-        """Formate les sources web pour le format standard"""
-        sources = []
-        
-        # Sources web
-        web_sources = web_result.get("sources", {}).get("web", [])
-        for source in web_sources:
-            sources.append({
-                "content": f"Source web: {source.get('title', 'Titre indisponible')}",
-                "metadata": {
-                    "source": source.get("url", ""),
-                    "type": "web",
-                    "title": source.get("title", "")
-                },
-                "source": source.get("url", ""),
-                "page_number": "web"
-            })
-        
-        # Sources vectorielles
-        vector_sources = web_result.get("sources", {}).get("vector", [])
-        for source in vector_sources:
-            sources.append({
-                "content": "Document juridique",
-                "metadata": {
-                    "source": source.get("source", "Document juridique"),
-                    "type": "vector"
-                },
-                "source": source.get("source", "Document juridique"),
-                "page_number": "N/A"
-            })
-        
-        return sources
-    
 def get_langchain_service(
     embedding_service=None,
     milvus_service=None,

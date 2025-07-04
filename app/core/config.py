@@ -7,8 +7,8 @@ class Settings(BaseSettings):
     DEBUG: bool = True
     
     # Chemins de données
-    DATA_PATH: str = "/home/mea/Documents/modelAi/data"
-    METADATA_PATH: str = "/home/mea/Documents/modelAi/metadata"
+    DATA_PATH: str = "/Users/imacpro/modelAi/data"
+    METADATA_PATH: str = "/Users/imacpro/modelAi/metadata"
     
     # Configuration Milvus
     MILVUS_HOST: str = "10.100.212.133"
@@ -17,11 +17,11 @@ class Settings(BaseSettings):
     EMBEDDING_DIM: int = 1024
     
     # Configuration du service d'embedding
-    EMBEDDING_SERVICE_URL: str = "http://10.100.212.115:8000"
-    EMBEDDING_MODEL: str = "BAAI/bge-m3"  # Ajouté ce champ manquant
+    EMBEDDING_SERVICE_URL: str = "http://192.168.50.215:8000"
+    EMBEDDING_MODEL: str = "BAAI/bge-m3"  # Ajouté ce champ manquant 192.168.50.215 10.100.210.10
     
     # Configuration LLM
-    LLM_SERVICE_URL: str = "http://10.100.212.115:8001/generate"
+    LLM_SERVICE_URL: str = "http://192.168.50.215:8001/generate"
     LLM_MODEL: str = "llama3.2:latest"
     
     # Configuration OCR

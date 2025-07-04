@@ -53,9 +53,9 @@ def check_environment():
     """Vérifie que l'environnement est correctement configuré."""
     # Vérifier les répertoires de données
     data_dirs = [
-        "/home/mea/Documents/modelAi/data",
-        "/home/mea/Documents/modelAi/metadata",
-        "/home/mea/Documents/modelAi/metadata/chunks"
+        "/Users/imacpro/modelAi/data",
+        "/Users/imacpro/modelAi/metadata",
+        "/Users/imacpro/modelAi/metadata/chunks"
     ]
     
     for directory in data_dirs:

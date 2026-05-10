@@ -1,0 +1,13 @@
+# Dépendances développement / test
+-r requirements.txt
+
+pytest==8.3.3
+pytest-asyncio==0.24.0
+pytest-cov==5.0.0
+pytest-mock==3.14.0
+httpx==0.28.1   # client de test FastAPI
+factory-boy==3.3.1
+faker==30.3.0
+ruff==0.6.9
+mypy==1.11.2
+pre-commit==3.8.0

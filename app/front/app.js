@@ -1,1408 +1,843 @@
-// Configuration de l'API
-const API_BASE_URL = 'http://localhost:8000/api';
-const API_ENDPOINTS = {
-    rag: '/rag/question',
-    search: '/search',
-    documents: '/documents/list',
-    upload: '/documents/upload',
-    processDoc: '/documents/process',
-    history: '/rag/history',
-    // Endpoints pour l'Agent RAG avec streaming
-    agent: '/agent/chat',
-    agentStream: '/agent/chat/stream',
-    agentSessions: '/agent/sessions',
-    agentReset: '/agent/reset'
+'use strict';
+
+// ── Configuration ─────────────────────────────────────────────────────────────
+const API = {
+  BASE:      'http://localhost:8000',
+  V1:        '/api/v1',
+  QUERY:     '/api/v1/query',
+  STREAM:    '/api/v1/query/stream',
+  INGEST:    '/api/v1/ingest',
+  HEALTH:    '/api/v1/health',
+  EVAL_RUN:  '/api/v1/evaluation/run',
+  EVAL_LIST: '/api/v1/evaluation/baselines',
 };
 
-// Sélecteurs DOM
-const DOM = {
-    // Navigation
-    navItems: document.querySelectorAll('.nav-menu li'),
-    sections: document.querySelectorAll('.content-section'),
-    rightPanel: document.getElementById('rightPanel'),
-    closePanel: document.getElementById('closePanel'),
-    
-    // Chat section avec éléments streaming
-    chatMessages: document.getElementById('chatMessages'),
-    questionInput: document.getElementById('questionInput'),
-    sendQuestion: document.getElementById('sendQuestion'),
-    resetChatBtn: document.getElementById('resetChat'),
-    useStreaming: document.getElementById('useStreaming'),
-    connectionStatus: document.getElementById('connectionStatus'),
-    sessionInfo: document.getElementById('sessionInfo'),
-    currentSessionId: document.getElementById('currentSessionId'),
-    
-    // Documents section
-    uploadBtn: document.getElementById('uploadBtn'),
-    fileUpload: document.getElementById('fileUpload'),
-    documentsList: document.getElementById('documentsList'),
-    docSearch: document.getElementById('docSearch'),
-    docFilter: document.getElementById('docFilter'),
-    
-    // Search section
-    searchInput: document.getElementById('searchInput'),
-    searchButton: document.getElementById('searchButton'),
-    searchResults: document.getElementById('searchResults'),
-    useRerank: document.getElementById('useRerank'),
-    topK: document.getElementById('topK'),
-    
-    // History section
-    historyList: document.getElementById('historyList'),
-    
-    // Modals
-    loadingModal: document.getElementById('loadingModal'),
-    loadingMessage: document.getElementById('loadingMessage'),
-    
-    // Panel
-    panelContent: document.getElementById('panelContent'),
-    previewTitle: document.getElementById('previewTitle')
+// ── App state ─────────────────────────────────────────────────────────────────
+const state = {
+  sessionId:          null,
+  streaming:          false,
+  abortCtrl:          null,
+  conversationHistory: [],   // [{q: string, a: string}]  — max 10 turns stored
+  sessionTurnCount:   0,
 };
 
-// État de l'application (fusionné avec chatState)
-const appState = {
-    activeSection: 'chat',
-    documents: [],
-    searchResults: [],
-    history: [],
-    sessions: [],
-    currentSessionId: null,
-    rightPanelOpen: false,
-    isLoading: false,
-    useAgent: true,
-    // État du streaming
-    isStreaming: false,
-    eventSource: null,
-    currentMessage: null
-};
+// ── DOM shortcuts ─────────────────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+const $q = sel => document.querySelector(sel);
 
-// Utilitaires génériques
-const utils = {
-    formatDate: (timestamp) => {
-        const date = new Date(timestamp * 1000);
-        return date.toLocaleString();
-    },
-    
-    truncateText: (text, maxLength = 150) => {
-        if (text.length <= maxLength) return text;
-        return text.substr(0, maxLength) + '...';
-    },
-    
-    showLoading: (message = 'Traitement en cours...') => {
-        DOM.loadingMessage.textContent = message;
-        DOM.loadingModal.classList.add('active');
-        appState.isLoading = true;
-    },
-    
-    hideLoading: () => {
-        DOM.loadingModal.classList.remove('active');
-        appState.isLoading = false;
-    },
-    
-    fetchAPI: async (endpoint, options = {}) => {
-        try {
-            const url = API_BASE_URL + endpoint;
-            const response = await fetch(url, options);
-            
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                throw new Error(errorData.detail || `Erreur ${response.status}: ${response.statusText}`);
-            }
-            
-            return await response.json();
-        } catch (error) {
-            console.error('Erreur API:', error);
-            throw error;
-        }
-    },
+// ── Toast ──────────────────────────────────────────────────────────────────────
+function toast(msg, type = 'info', ms = 3500) {
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = msg;
+  $('toastContainer').appendChild(el);
+  setTimeout(() => el.remove(), ms);
+}
 
-    // Utilitaires pour le streaming
-    updateConnectionStatus: (status, message) => {
-        if (DOM.connectionStatus) {
-            DOM.connectionStatus.className = `connection-status ${status}`;
-            const span = DOM.connectionStatus.querySelector('span');
-            if (span) span.textContent = message;
-        }
-    },
+// ── Navigation ─────────────────────────────────────────────────────────────────
+function initNav() {
+  document.querySelectorAll('.nav-item').forEach(item => {
+    item.addEventListener('click', () => {
+      const tab = item.dataset.tab;
+      document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      item.classList.add('active');
+      $(`tab-${tab}`).classList.add('active');
+      if (tab === 'health') health.refresh();
+    });
+  });
+}
 
-    updateSessionInfo: (sessionId, responseTime = null) => {
-        appState.currentSessionId = sessionId;
-        
-        if (DOM.sessionInfo && DOM.currentSessionId) {
-            DOM.sessionInfo.style.display = 'block';
-            DOM.currentSessionId.textContent = sessionId;
-            
-            if (responseTime) {
-                DOM.currentSessionId.textContent += ` (${responseTime.toFixed(2)}s)`;
-            }
-        }
+// ── API helper ────────────────────────────────────────────────────────────────
+async function apiCall(path, options = {}) {
+  const url = API.BASE + path;
+  const r = await fetch(url, options);
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({ detail: r.statusText }));
+    throw new Error(err.detail || `HTTP ${r.status}`);
+  }
+  return r.json();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ── MODULE : REQUÊTE ──────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+const query = {
+  init() {
+    $('btnSend').addEventListener('click', () => this.send());
+    $('queryInput').addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); this.send(); }
+    });
+    $('queryInput').addEventListener('input', function() {
+      this.style.height = 'auto';
+      this.style.height = Math.min(this.scrollHeight, 140) + 'px';
+    });
+    $('btnResetSession').addEventListener('click', () => {
+      state.sessionId = null;
+      state.conversationHistory = [];
+      state.sessionTurnCount = 0;
+      $('sessionBadge').style.display = 'none';
+      toast('Nouvelle session démarrée', 'info');
+    });
+  },
+
+  async send() {
+    const text = $('queryInput').value.trim();
+    if (!text || state.streaming) return;
+
+    const lang     = $('qLang').value;
+    const profile  = $('qProfile').value;
+    const streaming= $('qStream').checked;
+
+    // Remove welcome message
+    const welcome = $('chatMessages').querySelector('.welcome-msg');
+    if (welcome) welcome.remove();
+
+    // Add user bubble
+    appendMsg('user', text);
+    $('queryInput').value = '';
+    $('queryInput').style.height = 'auto';
+    $('btnSend').disabled = true;
+
+    if (streaming) {
+      await this.sendStream(text, lang, profile);
+    } else {
+      await this.sendStandard(text, lang, profile);
     }
-};
 
-// Gestionnaires pour chaque section
-const handlers = {
-    // Section Chat - Assistant juridique avec streaming intégré
-    chat: {
-        init: () => {
-            // Event listeners principaux
-            DOM.sendQuestion?.addEventListener('click', handlers.chat.sendQuestion);
-            DOM.resetChatBtn?.addEventListener('click', handlers.chat.resetChat);
-            
-            // Gestion des raccourcis clavier
-            DOM.questionInput?.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    if (!appState.isStreaming) {
-                        handlers.chat.sendQuestion();
-                    }
-                }
-            });
+    $('btnSend').disabled = false;
+  },
 
-            // Auto-resize du textarea
-            DOM.questionInput?.addEventListener('input', function() {
-                this.style.height = 'auto';
-                this.style.height = Math.min(this.scrollHeight, 120) + 'px';
-            });
+  async sendStandard(text, lang, profile) {
+    const aiEl = appendMsg('ai', null); // placeholder
+    const bubble = aiEl.querySelector('.msg-bubble');
+    bubble.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
 
-            // Nettoyage lors de la fermeture
-            window.addEventListener('beforeunload', () => {
-                handlers.chat.closeSSEConnection();
-            });
-            
-            console.log('✅ Chat avec streaming initialisé');
-        },
-        
-        sendQuestion: async () => {
-            const question = DOM.questionInput.value.trim();
-            if (!question || appState.isStreaming) return;
-            
-            try {
-                // Ajouter le message utilisateur
-                handlers.chat.addMessage(question, 'user');
-                
-                // Effacer et désactiver
-                DOM.questionInput.value = '';
-                DOM.questionInput.style.height = 'auto';
-                handlers.chat.setInputState(false);
-                
-                // Vérifier le mode streaming
-                const useStreaming = DOM.useStreaming?.checked ?? true;
-                
-                if (useStreaming && appState.useAgent) {
-                    // Mode streaming
-                    await handlers.chat.startStreamingResponse(question);
-                } else {
-                    // Mode standard (fallback)
-                    await handlers.chat.handleStandardResponse(question);
-                }
-                
-            } catch (error) {
-                console.error('Erreur lors de l\'envoi:', error);
-                handlers.chat.addMessage(`❌ Erreur: ${error.message}`, 'system error');
-            } finally {
-                handlers.chat.setInputState(true);
-            }
-        },
+    const body = {
+      query:           text,
+      language:        lang,
+      profile:         profile,
+      session_id:      state.sessionId || undefined,
+      session_context: buildSessionContext() || undefined,
+    };
 
-        startStreamingResponse: async (query) => {
-            return new Promise((resolve, reject) => {
-                try {
-                    // Fermer connexion précédente
-                    if (appState.eventSource) {
-                        appState.eventSource.close();
-                    }
-                    
-                    // Créer le message streaming
-                    const messageElement = handlers.chat.addMessage('', 'ai streaming');
-                    const contentDiv = messageElement.querySelector('.message-content');
-                    
-                    // Indicateur de frappe
-                    handlers.chat.addTypingIndicator(contentDiv);
-                    
-                    // Mettre à jour le statut
-                    utils.updateConnectionStatus('streaming', 'Génération en cours...');
-                    
-                    // URL SSE
-                    const url = new URL(`${API_BASE_URL}${API_ENDPOINTS.agentStream}`);
-                    url.searchParams.set('query', query);
-                    if (appState.currentSessionId) {
-                        url.searchParams.set('session_id', appState.currentSessionId);
-                    }
-                    
-                    // Créer EventSource
-                    appState.eventSource = new EventSource(url);
-                    appState.isStreaming = true;
-                    
-                    // Gérer les événements
-                    handlers.chat.setupSSEEventHandlers(resolve, reject, messageElement);
-                    
-                } catch (error) {
-                    reject(error);
-                }
-            });
-        },
-
-        setupSSEEventHandlers: (resolve, reject, messageElement) => {
-            const contentDiv = messageElement.querySelector('.message-content');
-            let messageContent = '';
-            
-            // Événement start
-            appState.eventSource.addEventListener('start', (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    appState.currentSessionId = data.session_id;
-                    utils.updateSessionInfo(data.session_id);
-                    handlers.chat.removeTypingIndicator(contentDiv);
-                } catch (e) {
-                    console.error('Erreur parsing start:', e);
-                }
-            });
-            
-            // Événement token
-            appState.eventSource.addEventListener('token', (event) => {
-                try {
-                    const token = event.data;
-                    messageContent += token;
-                    handlers.chat.updateMessageContent(contentDiv, messageContent);
-                    handlers.chat.scrollToBottom();
-                } catch (e) {
-                    console.error('Erreur token:', e);
-                }
-            });
-            
-            // Événement end
-            appState.eventSource.addEventListener('end', (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    
-                    // Finaliser le message
-                    messageElement.classList.remove('streaming');
-                    
-                    // Ajouter les sources seulement si elles sont utilisées et pertinentes
-                    if (data.source_documents && data.source_documents.length > 0) {
-                        // Vérifier si les sources ont été réellement utilisées
-                        const hasValidSources = data.source_documents.some(source => 
-                            source.metadata && 
-                            source.metadata.score && 
-                            source.metadata.score > 0.3 && // Seuil de pertinence
-                            source.text && 
-                            source.text.trim().length > 50 // Texte substantiel
-                        );
-                        
-                        if (hasValidSources) {
-                            handlers.chat.addSourcesInfo(messageElement, data.source_documents);
-                        }
-                    }
-                    
-                    // Mettre à jour la session
-                    utils.updateSessionInfo(data.session_id, data.response_time);
-                    utils.updateConnectionStatus('connected', 'Prêt');
-                    
-                    handlers.chat.closeSSEConnection();
-                    resolve();
-                    
-                } catch (e) {
-                    console.error('Erreur end:', e);
-                    handlers.chat.closeSSEConnection();
-                    resolve();
-                }
-            });
-            
-            // Événement error
-            appState.eventSource.addEventListener('error', (event) => {
-                console.error('Erreur SSE:', event);
-                
-                messageElement.classList.remove('streaming');
-                messageElement.classList.add('error');
-                
-                const errorDiv = document.createElement('div');
-                errorDiv.className = 'error-message';
-                errorDiv.textContent = 'Erreur lors de la réception de la réponse.';
-                contentDiv.appendChild(errorDiv);
-                
-                utils.updateConnectionStatus('disconnected', 'Erreur de connexion');
-                handlers.chat.closeSSEConnection();
-                reject(new Error('Erreur de streaming'));
-            });
-        },
-
-        handleStandardResponse: async (question) => {
-            try {
-                utils.showLoading('Recherche de la réponse...');
-                
-                if (appState.useAgent) {
-                    // Agent API
-                    const response = await utils.fetchAPI(API_ENDPOINTS.agent, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            query: question,
-                            session_id: appState.currentSessionId,
-                            streaming: false
-                        })
-                    });
-                    
-                    utils.hideLoading();
-                    appState.currentSessionId = response.session_id;
-                    utils.updateSessionInfo(response.session_id, response.response_time);
-                    
-                    // Ajouter la réponse avec sources seulement si pertinentes
-                    const sourcesToShow = handlers.chat.filterRelevantSources(response.source_documents);
-                    
-                    handlers.chat.addMessage(response.response, 'ai', sourcesToShow, {
-                        domains: response.domains,
-                        intent: response.intent,
-                        responseTime: response.response_time
-                    });
-                } else {
-                    // RAG traditionnel
-                    const response = await utils.fetchAPI(API_ENDPOINTS.rag, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            query: question,
-                            use_expansion: true,
-                            use_reranking: true
-                        })
-                    });
-                    
-                    utils.hideLoading();
-                    handlers.chat.addMessage(response.answer, 'ai', response.source_documents);
-                }
-                
-                handlers.chat.scrollToBottom();
-                
-            } catch (error) {
-                utils.hideLoading();
-                handlers.chat.addMessage(
-                    `Désolé, une erreur est survenue: ${error.message}`,
-                    'system'
-                );
-            }
-        },
-
-        // Méthodes utilitaires pour le streaming
-        filterRelevantSources: (sources) => {
-            if (!sources || !Array.isArray(sources)) return [];
-            
-            return sources.filter(source => {
-                // Vérifier la pertinence de la source
-                const metadata = source.metadata || {};
-                const score = metadata.score || 0;
-                const text = source.text || '';
-                
-                // Critères de filtrage :
-                // 1. Score de similarité > 0.3 (seuil de pertinence)
-                // 2. Texte substantiel (> 50 caractères)
-                // 3. Métadonnées valides
-                return (
-                    score > 0.3 && 
-                    text.trim().length > 50 && 
-                    metadata.filename && 
-                    metadata.document_id
-                );
-            });
-        },
-
-        updateMessageContent: (contentDiv, text) => {
-            contentDiv.innerHTML = '';
-            
-            // Formatage en temps réel du streaming
-            const formattedText = handlers.chat.formatMessageText(text);
-            
-            const textElement = document.createElement('div');
-            textElement.className = 'streaming-text';
-            textElement.innerHTML = formattedText;
-            contentDiv.appendChild(textElement);
-            
-            // Curseur de frappe
-            if (appState.isStreaming) {
-                const cursor = document.createElement('span');
-                cursor.className = 'typing-cursor';
-                cursor.textContent = '▋';
-                contentDiv.appendChild(cursor);
-            }
-        },
-
-        addTypingIndicator: (contentDiv) => {
-            const indicator = document.createElement('div');
-            indicator.className = 'typing-indicator';
-            indicator.innerHTML = '<span></span><span></span><span></span>';
-            contentDiv.appendChild(indicator);
-        },
-
-        removeTypingIndicator: (contentDiv) => {
-            const indicator = contentDiv.querySelector('.typing-indicator');
-            if (indicator) indicator.remove();
-        },
-
-        closeSSEConnection: () => {
-            if (appState.eventSource) {
-                appState.eventSource.close();
-                appState.eventSource = null;
-            }
-            appState.isStreaming = false;
-            appState.currentMessage = null;
-        },
-
-        setInputState: (enabled) => {
-            if (DOM.questionInput) DOM.questionInput.disabled = !enabled;
-            if (DOM.sendQuestion) DOM.sendQuestion.disabled = !enabled;
-            
-            // Mettre à jour le texte du bouton
-            if (DOM.sendQuestion) {
-                const btnText = DOM.sendQuestion.querySelector('.btn-text') || DOM.sendQuestion;
-                btnText.textContent = enabled ? 'Envoyer' : 'Génération...';
-            }
-        },
-
-        scrollToBottom: () => {
-            if (DOM.chatMessages) {
-                DOM.chatMessages.scrollTop = DOM.chatMessages.scrollHeight;
-            }
-        },
-        
-        addMessage: (text, type, sources = [], metadata = {}) => {
-            const messageDiv = document.createElement('div');
-            messageDiv.className = `message ${type}`;
-            
-            // Message content
-            const contentDiv = document.createElement('div');
-            contentDiv.className = 'message-content';
-            
-            if (text) {
-                // Améliorer le formatage du texte avec Markdown-like
-                const formattedText = handlers.chat.formatMessageText(text);
-                contentDiv.innerHTML = formattedText;
-            }
-            
-            messageDiv.appendChild(contentDiv);
-            
-            // Add sources if available and relevant
-            if (sources && sources.length > 0 && type === 'ai') {
-                // Filtrer les sources pertinentes
-                const relevantSources = handlers.chat.filterRelevantSources(sources);
-                
-                if (relevantSources.length > 0) {
-                    handlers.chat.addSourcesInfo(messageDiv, relevantSources);
-                    
-                    // Add metadata seulement si on a des sources
-                    if (metadata.domains && metadata.domains.length) {
-                        const domainsDiv = document.createElement('div');
-                        domainsDiv.className = 'domains-list';
-                        domainsDiv.style.cssText = "margin-top: 12px; font-size: 0.85rem; color: #64748b; padding: 8px 12px; background-color: #f1f5f9; border-radius: 6px;";
-                        domainsDiv.innerHTML = `<i class="fas fa-balance-scale"></i> <strong>Domaines juridiques:</strong> ${metadata.domains.join(', ')}`;
-                        contentDiv.appendChild(domainsDiv);
-                    }
-                    
-                    if (metadata.responseTime) {
-                        const timeDiv = document.createElement('div');
-                        timeDiv.className = 'response-time';
-                        timeDiv.style.cssText = "margin-top: 8px; font-size: 0.75rem; color: #94a3b8; text-align: right;";
-                        timeDiv.innerHTML = `<i class="fas fa-clock"></i> Réponse générée en ${metadata.responseTime.toFixed(2)}s`;
-                        contentDiv.appendChild(timeDiv);
-                    }
-                } else {
-                    // Pas de sources pertinentes, ajouter juste un indicateur subtil
-                    if (metadata.responseTime) {
-                        const timeDiv = document.createElement('div');
-                        timeDiv.className = 'response-time';
-                        timeDiv.style.cssText = "margin-top: 8px; font-size: 0.75rem; color: #94a3b8; text-align: right;";
-                        timeDiv.innerHTML = `<i class="fas fa-robot"></i> Réponse générée en ${metadata.responseTime.toFixed(2)}s`;
-                        contentDiv.appendChild(timeDiv);
-                    }
-                }
-            }
-            
-            // Add timestamp
-            const metaDiv = document.createElement('div');
-            metaDiv.className = 'message-meta';
-            metaDiv.textContent = new Date().toLocaleTimeString();
-            messageDiv.appendChild(metaDiv);
-            
-            // Add to chat
-            DOM.chatMessages.appendChild(messageDiv);
-            handlers.chat.scrollToBottom();
-            
-            return messageDiv;
-        },
-
-        formatMessageText: (text) => {
-            if (!text) return '';
-            
-            // Nettoyer le texte et séparer du contenu des sources
-            let cleanText = text;
-            
-            // Supprimer les sources qui apparaissent à la fin du texte
-            const sourcePatterns = [
-                /Sources?\s*:[\s\S]*$/i,
-                /Références?\s*:[\s\S]*$/i,
-                /Bibliographie\s*:[\s\S]*$/i
-            ];
-            
-            sourcePatterns.forEach(pattern => {
-                cleanText = cleanText.replace(pattern, '').trim();
-            });
-            
-            // Formatage Markdown-like
-            let formattedText = cleanText
-                // Titres
-                .replace(/^#\s+(.+)$/gm, '<h3>$1</h3>')
-                .replace(/^##\s+(.+)$/gm, '<h4>$1</h4>')
-                .replace(/^###\s+(.+)$/gm, '<h5>$1</h5>')
-                
-                // Texte en gras
-                .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-                .replace(/(?:^|\s)(\d+\.\s)/gm, '<br><strong>$1</strong>')
-                
-                // Listes à puces
-                .replace(/^\*\s+(.+)$/gm, '<li>$1</li>')
-                .replace(/^-\s+(.+)$/gm, '<li>$1</li>')
-                
-                // Paragraphes
-                .split('\n\n')
-                .map(paragraph => {
-                    paragraph = paragraph.trim();
-                    if (!paragraph) return '';
-                    
-                    // Si c'est une liste
-                    if (paragraph.includes('<li>')) {
-                        return `<ul>${paragraph}</ul>`;
-                    }
-                    
-                    // Si c'est un titre
-                    if (paragraph.startsWith('<h')) {
-                        return paragraph;
-                    }
-                    
-                    // Paragraphe normal
-                    return `<p>${paragraph}</p>`;
-                })
-                .filter(p => p)
-                .join('');
-            
-            return formattedText;
-        },
-
-        addSourcesInfo: (messageElement, sources) => {
-            if (!sources || sources.length === 0) return;
-            
-            // Filtrer les sources vraiment pertinentes pour l'affichage
-            const displaySources = sources.filter(source => {
-                const metadata = source.metadata || {};
-                return metadata.filename && source.text && source.text.trim().length > 30;
-            });
-            
-            if (displaySources.length === 0) return;
-            
-            const sourceListDiv = document.createElement('div');
-            sourceListDiv.className = 'source-list';
-            sourceListDiv.style.cssText = `
-                margin-top: 16px; 
-                padding: 12px 16px; 
-                background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%); 
-                border-radius: 8px; 
-                border-left: 4px solid #3b82f6;
-                box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-            `;
-            
-            const sourceHeader = document.createElement('div');
-            sourceHeader.style.cssText = "margin-bottom: 8px; font-weight: 600; color: #1e40af; display: flex; align-items: center; gap: 6px;";
-            sourceHeader.innerHTML = '<i class="fas fa-book-open"></i> Sources consultées';
-            sourceListDiv.appendChild(sourceHeader);
-            
-            // Container pour les sources
-            const sourcesContainer = document.createElement('div');
-            sourcesContainer.style.cssText = "display: flex; flex-direction: column; gap: 6px;";
-            
-            // Limiter à 3 sources maximum pour ne pas encombrer
-            displaySources.slice(0, 3).forEach((source, index) => {
-                const sourceItem = document.createElement('div');
-                sourceItem.className = 'source-item';
-                sourceItem.style.cssText = `
-                    display: flex; 
-                    align-items: center; 
-                    gap: 8px; 
-                    padding: 8px 12px; 
-                    background-color: white; 
-                    border-radius: 6px; 
-                    cursor: pointer; 
-                    transition: all 0.2s ease;
-                    border: 1px solid #e2e8f0;
-                    font-size: 0.9rem;
-                `;
-                
-                const metadata = source.metadata || {};
-                const filename = metadata.filename || 'Document inconnu';
-                const page = metadata.page_number || '?';
-                const score = metadata.score ? `${(metadata.score * 100).toFixed(0)}%` : '';
-                
-                // Icône du document
-                const iconSpan = document.createElement('span');
-                iconSpan.innerHTML = '<i class="fas fa-file-alt"></i>';
-                iconSpan.style.cssText = "color: #6b7280; width: 16px; text-align: center;";
-                
-                // Informations du document
-                const infoSpan = document.createElement('span');
-                infoSpan.style.cssText = "flex: 1; display: flex; flex-direction: column; gap: 2px;";
-                
-                const nameDiv = document.createElement('div');
-                nameDiv.style.cssText = "font-weight: 500; color: #374151;";
-                nameDiv.textContent = filename;
-                
-                const detailsDiv = document.createElement('div');
-                detailsDiv.style.cssText = "font-size: 0.8rem; color: #6b7280;";
-                detailsDiv.innerHTML = `Page ${page}${score ? ` • Pertinence: ${score}` : ''}`;
-                
-                infoSpan.appendChild(nameDiv);
-                infoSpan.appendChild(detailsDiv);
-                
-                // Badge de numéro
-                const badgeSpan = document.createElement('span');
-                badgeSpan.style.cssText = `
-                    background-color: #3b82f6; 
-                    color: white; 
-                    border-radius: 50%; 
-                    width: 20px; 
-                    height: 20px; 
-                    display: flex; 
-                    align-items: center; 
-                    justify-content: center; 
-                    font-size: 0.75rem; 
-                    font-weight: 600;
-                `;
-                badgeSpan.textContent = index + 1;
-                
-                sourceItem.appendChild(iconSpan);
-                sourceItem.appendChild(infoSpan);
-                sourceItem.appendChild(badgeSpan);
-                
-                // Événements de hover
-                sourceItem.addEventListener('mouseenter', () => {
-                    sourceItem.style.backgroundColor = '#f1f5f9';
-                    sourceItem.style.borderColor = '#3b82f6';
-                    sourceItem.style.transform = 'translateX(2px)';
-                });
-                
-                sourceItem.addEventListener('mouseleave', () => {
-                    sourceItem.style.backgroundColor = 'white';
-                    sourceItem.style.borderColor = '#e2e8f0';
-                    sourceItem.style.transform = 'translateX(0)';
-                });
-                
-                sourceItem.addEventListener('click', () => handlers.chat.showSourceDetails(source));
-                
-                sourcesContainer.appendChild(sourceItem);
-            });
-            
-            sourceListDiv.appendChild(sourcesContainer);
-            
-            // Ajouter une note sur le nombre total de sources si plus de 3
-            if (displaySources.length > 3) {
-                const moreInfo = document.createElement('div');
-                moreInfo.style.cssText = "margin-top: 8px; font-size: 0.8rem; color: #6b7280; text-align: center; font-style: italic;";
-                moreInfo.textContent = `... et ${displaySources.length - 3} autre(s) source(s)`;
-                sourceListDiv.appendChild(moreInfo);
-            }
-            
-            const contentDiv = messageElement.querySelector('.message-content');
-            contentDiv.appendChild(sourceListDiv);
-        },
-
-        showSourceDetails: (source) => {
-            const panel = DOM.rightPanel;
-            if (!panel) return;
-            
-            panel.classList.add('active');
-            
-            const metadata = source.metadata || {};
-            const filename = metadata.filename || 'Document inconnu';
-            const page = metadata.page_number || '?';
-            
-            DOM.previewTitle.textContent = `Source: ${filename}`;
-            
-            DOM.panelContent.innerHTML = `
-                <h3>${filename}</h3>
-                <div class="document-meta" style="margin: 20px 0;">
-                    <p><strong>Page:</strong> ${page}</p>
-                    <p><strong>Document ID:</strong> ${metadata.document_id || 'N/A'}</p>
-                    <p><strong>Score:</strong> ${metadata.score ? metadata.score.toFixed(3) : 'N/A'}</p>
-                </div>
-                <div class="source-content" style="background-color: #f8fafc; padding: 15px; border-radius: 8px; margin-top: 20px;">
-                    <h4>Extrait source:</h4>
-                    <p style="line-height: 1.6;">${source.text || 'Texte non disponible'}</p>
-                </div>
-            `;
-        },
-        
-        resetChat: async () => {
-            try {
-                // Fermer le streaming en cours
-                if (appState.isStreaming) {
-                    handlers.chat.closeSSEConnection();
-                }
-
-                utils.showLoading('Réinitialisation de la conversation...');
-                
-                if (appState.currentSessionId) {
-                    await utils.fetchAPI(API_ENDPOINTS.agentReset, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            session_id: appState.currentSessionId
-                        })
-                    });
-                    
-                    appState.currentSessionId = null;
-                    utils.updateSessionInfo('-');
-                }
-                
-                utils.hideLoading();
-                
-                // Garder le message de bienvenue
-                const welcomeMessage = DOM.chatMessages.querySelector('.message.system');
-                DOM.chatMessages.innerHTML = '';
-                if (welcomeMessage) {
-                    DOM.chatMessages.appendChild(welcomeMessage);
-                }
-                
-                utils.updateConnectionStatus('connected', 'Prêt');
-                
-                console.log('🔄 Conversation réinitialisée');
-                
-            } catch (error) {
-                utils.hideLoading();
-                handlers.chat.addMessage(
-                    `Erreur lors de la réinitialisation: ${error.message}`,
-                    'system'
-                );
-            }
-        },
-        
-        loadSession: async (sessionId) => {
-            try {
-                utils.showLoading('Chargement de la session...');
-                
-                const response = await utils.fetchAPI(`/agent/sessions/${sessionId}`);
-                
-                utils.hideLoading();
-                appState.currentSessionId = sessionId;
-                utils.updateSessionInfo(sessionId);
-                
-                DOM.chatMessages.innerHTML = '';
-                
-                handlers.chat.addMessage(
-                    `Session #${sessionId} chargée avec succès. Cette conversation contient ${response.message_count} messages.`,
-                    'system'
-                );
-                
-                response.messages.forEach(msg => {
-                    handlers.chat.addMessage(
-                        msg.content,
-                        msg.role === "user" ? "user" : "ai"
-                    );
-                });
-                
-            } catch (error) {
-                utils.hideLoading();
-                handlers.chat.addMessage(
-                    `Erreur lors du chargement de la session: ${error.message}`,
-                    'system'
-                );
-            }
-        }
-    },
-    
-    // Section Documents (inchangée)
-    documents: {
-        init: async () => {
-            DOM.uploadBtn?.addEventListener('click', () => DOM.fileUpload.click());
-            DOM.fileUpload?.addEventListener('change', handlers.documents.handleFileSelection);
-            DOM.docSearch?.addEventListener('input', handlers.documents.filterDocuments);
-            DOM.docFilter?.addEventListener('change', handlers.documents.filterDocuments);
-
-            // Glisser-déposer
-            const uploadZone = document.querySelector('.upload-zone');
-            if (uploadZone) {
-                uploadZone.addEventListener('dragover', e => {
-                    e.preventDefault();
-                    uploadZone.classList.add('drag-over');
-                });
-                uploadZone.addEventListener('dragleave', () => {
-                    uploadZone.classList.remove('drag-over');
-                });
-                uploadZone.addEventListener('drop', e => {
-                    e.preventDefault();
-                    uploadZone.classList.remove('drag-over');
-                    
-                    if (e.dataTransfer.files.length > 0) {
-                        handlers.documents.handleFileSelection({ target: { files: e.dataTransfer.files } });
-                    }
-                });
-            }
-            
-            await handlers.documents.loadDocuments();
-        },
-
-        // ... (toutes les autres méthodes documents restent identiques)
-        handleFileSelection: (e) => {
-            const files = Array.from(e.target.files).filter(file => file.type === 'application/pdf');
-            
-            if (files.length === 0) {
-                alert('Veuillez sélectionner des fichiers PDF.');
-                return;
-            }
-            
-            const selectedFilesContainer = document.getElementById('selectedFiles');
-            selectedFilesContainer.innerHTML = '';
-            
-            files.forEach(file => {
-                const fileItem = document.createElement('div');
-                fileItem.className = 'file-item';
-                fileItem.innerHTML = `
-                    <div class="file-name">${file.name}</div>
-                    <i class="fas fa-times remove-file" data-name="${file.name}"></i>
-                `;
-                selectedFilesContainer.appendChild(fileItem);
-            });
-            
-            if (files.length > 0) {
-                const uploadActions = document.createElement('div');
-                uploadActions.className = 'upload-actions';
-                uploadActions.innerHTML = `
-                    <button id="uploadSelectedBtn" class="btn primary">
-                        <i class="fas fa-upload"></i> Télécharger ${files.length} fichier(s)
-                    </button>
-                    <button id="clearSelectedBtn" class="btn secondary">
-                        <i class="fas fa-times"></i> Annuler
-                    </button>
-                    <div class="upload-progress">
-                        <div class="progress-bar" id="uploadProgressBar"></div>
-                    </div>
-                `;
-                selectedFilesContainer.appendChild(uploadActions);
-                
-                document.getElementById('uploadSelectedBtn').addEventListener('click', () => {
-                    handlers.documents.uploadSelectedFiles(files);
-                });
-                
-                document.getElementById('clearSelectedBtn').addEventListener('click', () => {
-                    selectedFilesContainer.innerHTML = '';
-                    DOM.fileUpload.value = '';
-                });
-            }
-        },
-
-        loadDocuments: async () => {
-            try {
-                DOM.documentsList.innerHTML = '<div class="loading-indicator">Chargement des documents...</div>';
-                
-                const data = await utils.fetchAPI(API_ENDPOINTS.documents);
-                appState.documents = data.documents_list || [];
-                
-                handlers.documents.renderDocuments();
-                
-            } catch (error) {
-                DOM.documentsList.innerHTML = `
-                    <div class="error-message">
-                        <i class="fas fa-exclamation-circle"></i> 
-                        Erreur lors du chargement des documents: ${error.message}
-                    </div>
-                `;
-            }
-        },
-
-        renderDocuments: () => {
-            if (!appState.documents.length) {
-                DOM.documentsList.innerHTML = `
-                    <div class="loading-indicator">
-                        <i class="fas fa-file-alt"></i> 
-                        Aucun document disponible. Téléchargez votre premier document!
-                    </div>
-                `;
-                return;
-            }
-            
-            const searchText = DOM.docSearch.value.toLowerCase();
-            const filterValue = DOM.docFilter.value;
-            
-            const filteredDocs = appState.documents.filter(doc => {
-                const filename = doc.filename?.toLowerCase() || '';
-                const isScanned = doc.is_scanned || false;
-                
-                const textMatch = !searchText || filename.includes(searchText);
-                
-                let typeMatch = true;
-                if (filterValue === 'scanned') typeMatch = isScanned;
-                if (filterValue === 'digital') typeMatch = !isScanned;
-                
-                return textMatch && typeMatch;
-            });
-            
-            DOM.documentsList.innerHTML = '';
-            
-            filteredDocs.forEach(doc => {
-                const card = document.createElement('div');
-                card.className = 'document-card';
-                card.dataset.id = doc.document_id;
-                
-                const filename = doc.filename || 'Document sans nom';
-                const chunkCount = doc.chunk_count || 0;
-                const isScanned = doc.is_scanned ? 'Document scanné' : 'Document numérique';
-                const dateAdded = doc.processed_date ? utils.formatDate(new Date(doc.processed_date).getTime() / 1000) : 'Date inconnue';
-                
-                card.innerHTML = `
-                    <div class="document-header">
-                        <span>${utils.truncateText(filename, 20)}</span>
-                        <i class="fas ${doc.is_scanned ? 'fa-file-image' : 'fa-file-alt'}"></i>
-                    </div>
-                    <div class="document-body">
-                        <div>${utils.truncateText(filename, 30)}</div>
-                        <div class="document-meta">
-                            <div><i class="fas fa-puzzle-piece"></i> ${chunkCount} segments</div>
-                            <div><i class="fas ${doc.is_scanned ? 'fa-file-image' : 'fa-file-alt'}"></i> ${isScanned}</div>
-                            <div><i class="fas fa-calendar"></i> ${dateAdded}</div>
-                        </div>
-                    </div>
-                    <div class="document-actions">
-                        <button class="btn secondary view-doc"><i class="fas fa-eye"></i> Aperçu</button>
-                        <button class="btn secondary process-doc"><i class="fas fa-sync"></i> Retraiter</button>
-                    </div>
-                `;
-                
-                card.querySelector('.view-doc').addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    handlers.documents.viewDocument(doc);
-                });
-                
-                card.querySelector('.process-doc').addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    handlers.documents.processDocument(doc);
-                });
-                
-                DOM.documentsList.appendChild(card);
-            });
-        },
-
-        uploadSelectedFiles: async (files) => {
-            // Version simplifiée pour économiser l'espace
-            console.log(`Téléchargement de ${files.length} fichiers...`);
-            // Implémenter la logique d'upload ici
-        },
-
-        filterDocuments: () => {
-            handlers.documents.renderDocuments();
-        },
-
-        viewDocument: (doc) => {
-            DOM.previewTitle.textContent = doc.filename || 'Détails du document';
-            
-            let content = `
-                <h3>${doc.filename || 'Document sans nom'}</h3>
-                <div class="document-meta" style="margin: 20px 0;">
-                    <p><strong>ID:</strong> ${doc.document_id}</p>
-                    <p><strong>Type:</strong> ${doc.is_scanned ? 'Document scanné' : 'Document numérique'}</p>
-                    <p><strong>Segments:</strong> ${doc.chunk_count || 0}</p>
-                    <p><strong>Date d'ajout:</strong> ${doc.processed_date ? utils.formatDate(new Date(doc.processed_date).getTime() / 1000) : 'Date inconnue'}</p>
-                </div>
-            `;
-            
-            DOM.panelContent.innerHTML = content;
-            handlers.ui.toggleRightPanel(true);
-        },
-
-        processDocument: async (doc) => {
-            if (!confirm(`Êtes-vous sûr de vouloir retraiter ce document: ${doc.filename}?`)) {
-                return;
-            }
-            
-            try {
-                utils.showLoading('Retraitement du document...');
-                
-                const formData = new FormData();
-                formData.append('force_reprocess', 'true');
-                
-                const response = await fetch(`${API_BASE_URL}${API_ENDPOINTS.processDoc}/${doc.filename}`, {
-                    method: 'POST',
-                    body: formData
-                });
-                
-                if (!response.ok) {
-                    const errorData = await response.json().catch(() => ({}));
-                    throw new Error(errorData.detail || `Erreur ${response.status}: ${response.statusText}`);
-                }
-                
-                utils.hideLoading();
-                alert(`Document "${doc.filename}" retraité avec succès.`);
-                await handlers.documents.loadDocuments();
-                
-            } catch (error) {
-                utils.hideLoading();
-                alert(`Erreur lors du retraitement: ${error.message}`);
-            }
-        }
-    },
-    
-    // Section Search (optimisée)
-    search: {
-        init: () => {
-            DOM.searchButton?.addEventListener('click', handlers.search.performSearch);
-            DOM.searchInput?.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    handlers.search.performSearch();
-                }
-            });
-        },
-        
-        performSearch: async () => {
-            const query = DOM.searchInput.value.trim();
-            if (!query) return;
-            
-            try {
-                utils.showLoading('Recherche en cours...');
-                
-                const useRerank = DOM.useRerank?.checked ?? true;
-                const topK = parseInt(DOM.topK?.value ?? 10);
-                
-                const response = await utils.fetchAPI(API_ENDPOINTS.search, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        query,
-                        top_k: topK,
-                        use_rerank: useRerank,
-                        use_llm_rerank: false
-                    })
-                });
-                
-                utils.hideLoading();
-                appState.searchResults = response.results || [];
-                handlers.search.renderResults(query, response);
-                
-            } catch (error) {
-                utils.hideLoading();
-                DOM.searchResults.innerHTML = `
-                    <div class="error-message">
-                        <i class="fas fa-exclamation-circle"></i> 
-                        Erreur lors de la recherche: ${error.message}
-                    </div>
-                `;
-            }
-        },
-        
-        renderResults: (query, response) => {
-            const results = response.results || [];
-            const totalResults = response.total_results || 0;
-            const searchTime = response.search_time || 0;
-            
-            if (!results.length) {
-                DOM.searchResults.innerHTML = `
-                    <div class="loading-indicator">
-                        <i class="fas fa-search"></i> 
-                        Aucun résultat trouvé pour "${query}".
-                    </div>
-                `;
-                return;
-            }
-            
-            let header = `
-                <div style="margin-bottom: 20px;">
-                    <h3>${totalResults} résultat(s) pour "${query}"</h3>
-                    <p style="color: var(--secondary-color);">
-                        Recherche effectuée en ${searchTime.toFixed(2)} secondes
-                    </p>
-                </div>
-            `;
-            
-            let resultsHTML = '';
-            
-            results.forEach((result) => {
-                const metadata = result.metadata || {};
-                const score = result.score * 100;
-                
-                resultsHTML += `
-                    <div class="result-card">
-                        <div class="result-header">
-                            <div class="result-source">
-                                <i class="fas fa-file-alt"></i>
-                                ${metadata.filename || 'Document inconnu'} (p.${metadata.page_number || '?'})
-                            </div>
-                            <div class="result-score">${score.toFixed(1)}%</div>
-                        </div>
-                        <div class="result-content">
-                            <p>${result.text}</p>
-                            <div class="result-meta">
-                                <span><i class="fas fa-file-alt"></i> ${metadata.document_id ? metadata.document_id.substring(0, 8) + '...' : 'ID inconnu'}</span>
-                                <span><i class="fas fa-puzzle-piece"></i> ${metadata.chunk_id ? metadata.chunk_id.substring(0, 8) + '...' : 'Chunk inconnu'}</span>
-                                ${metadata.section_type ? `<span><i class="fas fa-bookmark"></i> ${metadata.section_type} ${metadata.section_number || ''}</span>` : ''}
-                            </div>
-                        </div>
-                    </div>
-                `;
-            });
-            
-            DOM.searchResults.innerHTML = header + resultsHTML;
-        }
-    },
-    
-    // Section History avec support des sessions
-    history: {
-        init: async () => {
-            if (appState.useAgent) {
-                await handlers.history.loadSessions();
-            } else {
-                await handlers.history.loadHistory();
-            }
-        },
-        
-        loadHistory: async () => {
-            try {
-                DOM.historyList.innerHTML = '<div class="loading-indicator">Chargement de l\'historique...</div>';
-                
-                const data = await utils.fetchAPI(API_ENDPOINTS.history);
-                appState.history = data || [];
-                
-                handlers.history.renderHistory();
-                
-            } catch (error) {
-                DOM.historyList.innerHTML = `
-                    <div class="error-message">
-                        <i class="fas fa-exclamation-circle"></i> 
-                        Erreur lors du chargement de l'historique: ${error.message}
-                    </div>
-                `;
-            }
-        },
-        
-        renderHistory: () => {
-            if (!appState.history.length) {
-                DOM.historyList.innerHTML = `
-                    <div class="loading-indicator">
-                        <i class="fas fa-history"></i> 
-                        Aucun historique disponible. Posez une question pour commencer!
-                    </div>
-                `;
-                return;
-            }
-            
-            DOM.historyList.innerHTML = '';
-            
-            appState.history.forEach(item => {
-                const card = document.createElement('div');
-                card.className = 'history-item';
-                
-                const time = item.timestamp ? utils.formatDate(item.timestamp) : 'Date inconnue';
-                
-                card.innerHTML = `
-                    <div class="history-header">
-                        <div>Question</div>
-                        <div class="history-time">${time}</div>
-                    </div>
-                    <div class="history-query">${item.query}</div>
-                    <div class="history-answer">${item.answer}</div>
-                `;
-                
-                card.addEventListener('click', () => {
-                    navigation.activateSection('chat');
-                    DOM.questionInput.value = item.query;
-                    DOM.questionInput.focus();
-                });
-                
-                DOM.historyList.appendChild(card);
-            });
-        },
-        
-        loadSessions: async () => {
-            try {
-                DOM.historyList.innerHTML = '<div class="loading-indicator">Chargement des sessions...</div>';
-                
-                const data = await utils.fetchAPI(API_ENDPOINTS.agentSessions);
-                appState.sessions = data.sessions || [];
-                
-                handlers.history.renderSessions();
-                
-            } catch (error) {
-                DOM.historyList.innerHTML = `
-                    <div class="error-message">
-                        <i class="fas fa-exclamation-circle"></i> 
-                        Erreur lors du chargement des sessions: ${error.message}
-                    </div>
-                `;
-            }
-        },
-        
-        renderSessions: () => {
-            if (!appState.sessions.length) {
-                DOM.historyList.innerHTML = `
-                    <div class="loading-indicator">
-                        <i class="fas fa-history"></i> 
-                        Aucune session disponible. Posez une question pour commencer!
-                    </div>
-                `;
-                return;
-            }
-            
-            DOM.historyList.innerHTML = '';
-            
-            const header = document.createElement('div');
-            header.className = 'history-header-info';
-            header.innerHTML = `
-                <div style="padding: 10px; margin-bottom: 15px; background-color: var(--message-system-bg, #fef3c7); border-radius: 8px;">
-                    <p><strong>Sessions de conversation</strong></p>
-                    <p style="font-size: 0.9rem;">Cliquez sur une session pour continuer la conversation.</p>
-                </div>
-            `;
-            DOM.historyList.appendChild(header);
-            
-            appState.sessions.forEach(session => {
-                const sessionItem = document.createElement('div');
-                sessionItem.className = 'history-item';
-                
-                if (appState.currentSessionId === session.session_id) {
-                    sessionItem.classList.add('active');
-                }
-                
-                const time = new Date(session.last_time * 1000).toLocaleString();
-                
-                sessionItem.innerHTML = `
-                    <div class="history-header">
-                        <div>Session #${session.session_id}</div>
-                        <div class="history-time">${time}</div>
-                    </div>
-                    <div class="history-query">${session.first_query}</div>
-                    <div class="history-interactions">${session.interactions} interactions</div>
-                `;
-                
-                sessionItem.addEventListener('click', () => {
-                    appState.currentSessionId = session.session_id;
-                    handlers.chat.loadSession(session.session_id);
-                    navigation.activateSection('chat');
-                });
-                
-                DOM.historyList.appendChild(sessionItem);
-            });
-        }
-    },
-    
-    // UI handlers
-    ui: {
-        toggleRightPanel: (show) => {
-            if (show) {
-                DOM.rightPanel?.classList.add('active');
-                appState.rightPanelOpen = true;
-            } else {
-                DOM.rightPanel?.classList.remove('active');
-                appState.rightPanelOpen = false;
-            }
-        }
-    }
-};
-
-// Navigation system (optimisé)
-const navigation = {
-    init: () => {
-        DOM.navItems.forEach(item => {
-            item.addEventListener('click', () => {
-                const section = item.dataset.section;
-                navigation.activateSection(section);
-            });
-        });
-        
-        DOM.closePanel?.addEventListener('click', () => {
-            handlers.ui.toggleRightPanel(false);
-        });
-    },
-    
-    activateSection: (section) => {
-        // Mettre à jour la navigation
-        DOM.navItems.forEach(item => {
-            if (item.dataset.section === section) {
-                item.classList.add('active');
-            } else {
-                item.classList.remove('active');
-            }
-        });
-        
-        // Mettre à jour les sections
-        DOM.sections.forEach(s => {
-            if (s.id === section) {
-                s.classList.add('active');
-            } else {
-                s.classList.remove('active');
-            }
-        });
-        
-        appState.activeSection = section;
-        
-        // Recharger les données si nécessaire
-        if (section === 'history') {
-            handlers.history.init();
-        }
-    }
-};
-
-// Fonctions utilitaires globales pour le debugging
-const debugUtils = {
-    enableDebugMode: () => {
-        window.appState = appState;
-        window.handlers = handlers;
-        window.utils = utils;
-        console.log('🐛 Mode debug activé - Variables disponibles: appState, handlers, utils');
-    },
-    
-    testStreaming: async () => {
-        console.log('🧪 Test du streaming...');
-        await handlers.chat.startStreamingResponse('Test du streaming LexCam');
-    },
-    
-    logState: () => {
-        console.log('📊 État actuel de l\'application:', {
-            activeSection: appState.activeSection,
-            currentSessionId: appState.currentSessionId,
-            isStreaming: appState.isStreaming,
-            documentsCount: appState.documents.length,
-            sessionsCount: appState.sessions.length
-        });
-    }
-};
-
-// Gestion des erreurs globales
-window.addEventListener('error', (event) => {
-    console.error('❌ Erreur globale:', event.error);
-    utils.updateConnectionStatus('disconnected', 'Erreur système');
-});
-
-window.addEventListener('unhandledrejection', (event) => {
-    console.error('❌ Promesse rejetée:', event.reason);
-    event.preventDefault();
-});
-
-// Initialize application
-(async function initApp() {
-    console.log('🚀 Initialisation de LexCam avec streaming intégré');
-    
     try {
-        // Initialiser la navigation
-        navigation.init();
-        
-        // Initialiser tous les gestionnaires de section
-        await handlers.chat.init();
-        await handlers.documents.init();
-        await handlers.search.init();
-        await handlers.history.init();
-        
-        // Activer le mode debug en développement
-        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-            debugUtils.enableDebugMode();
-        }
-        
-        // Initialiser le statut de connexion
-        utils.updateConnectionStatus('connected', 'Prêt');
-        
-        console.log('✅ LexCam initialisé avec succès');
-        
-    } catch (error) {
-        console.error('❌ Erreur lors de l\'initialisation:', error);
-        utils.updateConnectionStatus('disconnected', 'Erreur d\'initialisation');
+      const res = await apiCall(API.QUERY, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(body),
+      });
+
+      // Persist session id
+      if (res.session_id) {
+        state.sessionId = res.session_id;
+        showSessionBadge(res.session_id);
+      }
+
+      // Record exchange in history
+      recordExchange(text, res.answer);
+
+      renderAIResponse(aiEl, res);
+    } catch (err) {
+      bubble.textContent = `Erreur : ${err.message}`;
+      toast(err.message, 'error');
     }
-})();
+  },
+
+  async sendStream(text, lang, profile) {
+    const aiEl = appendMsg('ai', null);
+    const bubble = aiEl.querySelector('.msg-bubble');
+    bubble.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
+
+    const body = {
+      query:           text,
+      language:        lang,
+      profile:         profile,
+      session_id:      state.sessionId || undefined,
+      session_context: buildSessionContext() || undefined,
+    };
+
+    state.streaming = true;
+    state.abortCtrl = new AbortController();
+
+    try {
+      const r = await fetch(API.BASE + API.STREAM, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(body),
+        signal:  state.abortCtrl.signal,
+      });
+
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+
+      const reader = r.body.getReader();
+      const decoder = new TextDecoder();
+      let fullText = '';
+      let started  = false;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+
+        // Parse SSE lines: "data: ..."
+        chunk.split('\n').forEach(line => {
+          if (!line.startsWith('data: ')) return;
+          const raw = line.slice(6);
+
+          // Marqueurs spéciaux (non JSON)
+          if (raw.trim() === '[DONE]') return;
+          if (raw.trim().startsWith('[ERROR]')) {
+            bubble.textContent = raw.trim();
+            return;
+          }
+
+          // Token JSON-encodé (préserve \n, espaces, accents)
+          let token;
+          try {
+            token = JSON.parse(raw);
+          } catch {
+            token = raw; // fallback si payload non-JSON
+          }
+
+          if (!started) {
+            bubble.textContent = '';
+            started = true;
+          }
+          fullText += token;
+          // Rendu Markdown progressif — re-render à chaque token contenant une nouvelle ligne
+          if (token.includes('\n')) {
+            bubble.classList.add('markdown');
+            bubble.innerHTML = renderMarkdown(fullText);
+          } else if (!bubble.classList.contains('markdown')) {
+            bubble.textContent = fullText;
+          } else {
+            // Déjà en mode markdown : continuer à re-render pour rester cohérent
+            bubble.innerHTML = renderMarkdown(fullText);
+          }
+          scrollChat();
+        });
+      }
+
+      // Record exchange and update session display
+      if (fullText) {
+        if (!state.sessionId) {
+          state.sessionId = 'stream-' + Date.now();
+          showSessionBadge(state.sessionId);
+        }
+        recordExchange(text, fullText);
+      }
+
+      // Rendu Markdown complet à la fin du streaming
+      if (fullText) {
+        bubble.classList.add('markdown');
+        bubble.innerHTML = renderMarkdown(fullText);
+      }
+
+      // Add minimal meta after streaming (no full QueryResponse available)
+      const meta = document.createElement('div');
+      meta.className = 'msg-meta';
+      meta.innerHTML = `<span class="badge model"><i class="fas fa-robot"></i> streaming</span>`;
+      aiEl.appendChild(meta);
+
+    } catch (err) {
+      if (err.name !== 'AbortError') {
+        bubble.textContent = `Erreur : ${err.message}`;
+        toast(err.message, 'error');
+      }
+    } finally {
+      state.streaming = false;
+      state.abortCtrl = null;
+    }
+  },
+};
+
+// ── Markdown renderer ─────────────────────────────────────────────────────────
+function renderMarkdown(raw) {
+  if (!raw) return '';
+
+  // Échapper le HTML (sécurité XSS) avant d'ajouter les balises structurelles
+  const esc = s => String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+  // Formatage inline : gras, italique, code
+  const inline = s => s
+    .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/`(.+?)`/g, '<code>$1</code>');
+
+  const lines = raw.split('\n');
+  let html = '';
+  let inOl = false, inUl = false;
+
+  const closeOl = () => { if (inOl) { html += '</ol>'; inOl = false; } };
+  const closeUl = () => { if (inUl) { html += '</ul>'; inUl = false; } };
+  const closeLists = () => { closeOl(); closeUl(); };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const e = esc(line);
+
+    const mOl = line.match(/^(\d+)[.)]\s+(.+)/);
+    const mUl = line.match(/^[-*]\s+(.+)/);
+    const mH3 = line.match(/^###\s+(.+)/);
+    const mH2 = line.match(/^##\s+(.+)/);
+    const mH1 = line.match(/^#\s+(.+)/);
+
+    if (mH1) { closeLists(); html += `<h2>${inline(esc(mH1[1]))}</h2>`; }
+    else if (mH2) { closeLists(); html += `<h3>${inline(esc(mH2[1]))}</h3>`; }
+    else if (mH3) { closeLists(); html += `<h4>${inline(esc(mH3[1]))}</h4>`; }
+    else if (mOl) {
+      closeUl();
+      if (!inOl) { html += '<ol>'; inOl = true; }
+      html += `<li>${inline(esc(mOl[2]))}</li>`;
+    } else if (mUl) {
+      closeOl();
+      if (!inUl) { html += '<ul>'; inUl = true; }
+      html += `<li>${inline(esc(mUl[1]))}</li>`;
+    } else if (line.trim() === '') {
+      closeLists();
+      // Double newline → séparateur de paragraphe
+      if (html && !html.endsWith('</p>') && !html.endsWith('<br>')) {
+        html += '<br>';
+      }
+    } else {
+      closeLists();
+      html += `<p>${inline(e)}</p>`;
+    }
+  }
+  closeLists();
+  return html;
+}
+
+// ── Render AI response ────────────────────────────────────────────────────────
+function renderAIResponse(aiEl, res) {
+  const bubble = aiEl.querySelector('.msg-bubble');
+  bubble.classList.add('markdown');
+  bubble.innerHTML = renderMarkdown(res.answer);
+
+  // Meta badges
+  const meta = document.createElement('div');
+  meta.className = 'msg-meta';
+
+  const confidence = res.confidence_level || confidenceFromScore(res.uncertainty_score);
+  meta.innerHTML += `<span class="badge ${confidence}">${confidenceLabel(confidence)}</span>`;
+
+  if (res.uncertainty_score !== undefined) {
+    const pct = (res.uncertainty_score * 100).toFixed(0);
+    meta.innerHTML += `<span class="badge latency">score ${pct}%</span>`;
+  }
+  if (res.language_detected) {
+    meta.innerHTML += `<span class="badge lang">${res.language_detected.toUpperCase()}</span>`;
+  }
+  if (res.model_used) {
+    meta.innerHTML += `<span class="badge model"><i class="fas fa-microchip"></i> ${res.model_used}</span>`;
+  }
+  if (res.latency_ms) {
+    meta.innerHTML += `<span class="badge latency"><i class="fas fa-clock"></i> ${res.latency_ms.toFixed(0)} ms</span>`;
+  }
+
+  // Safety flags
+  (res.safety_flags || []).forEach(flag => {
+    meta.innerHTML += `<span class="badge flag"><i class="fas fa-triangle-exclamation"></i> ${flag}</span>`;
+  });
+
+  aiEl.appendChild(meta);
+
+  // Warnings
+  if (res.warnings && res.warnings.length) {
+    const w = document.createElement('div');
+    w.className = 'warnings-block';
+    w.innerHTML = res.warnings.map(
+      ww => `<p><i class="fas fa-circle-exclamation"></i> ${escHtml(ww)}</p>`
+    ).join('');
+    aiEl.appendChild(w);
+  }
+
+  // Citations
+  if (res.citations && res.citations.length) {
+    const cBlock = document.createElement('div');
+    cBlock.className = 'citations-block';
+    cBlock.innerHTML = `<h4><i class="fas fa-quote-left"></i> Citations (${res.citations.length})</h4>`;
+    res.citations.forEach(c => {
+      cBlock.innerHTML += `
+        <div class="citation-item">
+          <i class="fas fa-file-lines"></i>
+          <div>
+            <div><span class="citation-source">${escHtml(c.source || '—')}</span>
+              ${c.page ? `<span class="citation-page"> · p. ${c.page}</span>` : ''}
+              ${c.score !== undefined ? `<span class="citation-page"> · score ${(c.score*100).toFixed(0)}%</span>` : ''}
+            </div>
+            ${c.excerpt ? `<div class="citation-excerpt">"${escHtml(truncate(c.excerpt, 160))}"</div>` : ''}
+          </div>
+        </div>`;
+    });
+    aiEl.appendChild(cBlock);
+  }
+
+  // Retrieved chunks (collapsible)
+  if (res.retrieved_chunks && res.retrieved_chunks.length) {
+    const btn = document.createElement('button');
+    btn.className = 'chunks-toggle';
+    btn.textContent = `▶ Voir ${res.retrieved_chunks.length} chunk(s) récupéré(s)`;
+    const chunksList = document.createElement('div');
+    chunksList.className = 'chunks-list';
+    chunksList.style.display = 'none';
+
+    res.retrieved_chunks.forEach(ch => {
+      const score = ch.final_score || ch.rerank_score || ch.rrf_score || 0;
+      const scoreClass = score >= 0.7 ? 'score-hi' : score >= 0.4 ? 'score-mid' : 'score-lo';
+      chunksList.innerHTML += `
+        <div class="chunk-card">
+          <div class="chunk-header">
+            <span class="chunk-source">${escHtml(ch.source || '—')}</span>
+            ${ch.page ? `<span class="chunk-score">p. ${ch.page}</span>` : ''}
+            <span class="chunk-score ${scoreClass}">▲ ${(score * 100).toFixed(0)}%</span>
+            ${ch.language ? `<span class="badge lang">${ch.language.toUpperCase()}</span>` : ''}
+          </div>
+          <div class="chunk-content">${escHtml(truncate(ch.content || '', 240))}</div>
+          ${ch.dense_score !== undefined ? `
+            <div class="chunk-score" style="margin-top:4px;font-size:.7rem">
+              dense ${(ch.dense_score*100).toFixed(0)}% &nbsp;|&nbsp;
+              bm25 ${((ch.sparse_score||0)*100).toFixed(0)}% &nbsp;|&nbsp;
+              rrf ${(ch.rrf_score||0).toFixed(4)}
+              ${ch.rerank_score !== undefined ? `&nbsp;|&nbsp; rerank ${(ch.rerank_score*100).toFixed(0)}%` : ''}
+            </div>` : ''}
+        </div>`;
+    });
+
+    btn.addEventListener('click', () => {
+      const hidden = chunksList.style.display === 'none';
+      chunksList.style.display = hidden ? 'flex' : 'none';
+      btn.textContent = hidden
+        ? `▼ Masquer les chunks`
+        : `▶ Voir ${res.retrieved_chunks.length} chunk(s) récupéré(s)`;
+    });
+
+    aiEl.appendChild(btn);
+    aiEl.appendChild(chunksList);
+  }
+
+  scrollChat();
+}
+
+// ── Helpers msg ───────────────────────────────────────────────────────────────
+function appendMsg(role, text) {
+  const wrapper = document.createElement('div');
+  wrapper.className = `msg ${role}`;
+  const roleLabel = { user: 'Vous', ai: 'GOV-AI 2.0', system: 'Système' };
+  wrapper.innerHTML = `
+    <div class="msg-role">${roleLabel[role] || role}</div>
+    <div class="msg-bubble">${text !== null ? escHtml(text) : ''}</div>`;
+  $('chatMessages').appendChild(wrapper);
+  scrollChat();
+  return wrapper;
+}
+
+function scrollChat() {
+  const msgs = $('chatMessages');
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+function showSessionBadge(id) {
+  state.sessionId = id;
+  $('sessionIdDisplay').textContent = `Session : ${id.slice(0, 8)}…`;
+  $('sessionBadge').style.display = 'flex';
+  updateTurnCounter();
+}
+
+function updateTurnCounter() {
+  const el = $('sessionTurns');
+  if (!el) return;
+  const n = state.sessionTurnCount;
+  el.textContent = n > 0 ? `· ${n} tour${n > 1 ? 's' : ''}` : '';
+}
+
+/**
+ * Enregistre un échange (question + réponse) dans l'historique de session.
+ * Conserve les MAX_HISTORY derniers échanges pour éviter de dépasser la limite.
+ */
+function recordExchange(question, answer) {
+  const MAX_HISTORY = 10;
+  const MAX_ANSWER_LEN = 300; // tronquer les réponses longues pour le contexte
+
+  state.conversationHistory.push({
+    q: question.trim(),
+    a: answer.trim().slice(0, MAX_ANSWER_LEN) + (answer.length > MAX_ANSWER_LEN ? '…' : ''),
+  });
+
+  // Ne conserver que les MAX_HISTORY derniers échanges
+  if (state.conversationHistory.length > MAX_HISTORY) {
+    state.conversationHistory = state.conversationHistory.slice(-MAX_HISTORY);
+  }
+
+  state.sessionTurnCount++;
+  updateTurnCounter();
+}
+
+/**
+ * Construit le champ session_context à partir des derniers échanges.
+ * Envoie les 5 échanges les plus récents (≈ contexte pertinent sans surcharger le LLM).
+ * Retourne une chaîne vide si aucun historique.
+ */
+function buildSessionContext() {
+  const CONTEXT_TURNS = 5;
+  const recent = state.conversationHistory.slice(-CONTEXT_TURNS);
+  if (recent.length === 0) return '';
+
+  return recent.map(
+    (turn, i) => `Tour ${state.conversationHistory.length - recent.length + i + 1} :\nQ: ${turn.q}\nR: ${turn.a}`
+  ).join('\n\n');
+}
+
+function confidenceFromScore(s) {
+  if (s === undefined || s === null) return 'medium';
+  if (s >= 0.8) return 'high';
+  if (s >= 0.6) return 'medium';
+  if (s >= 0.3) return 'low';
+  return 'insufficient';
+}
+
+function confidenceLabel(c) {
+  return { high: '✓ Confiance haute', medium: '~ Confiance moyenne',
+           low: '⚠ Confiance faible', insufficient: '✗ Insuffisant' }[c] || c;
+}
+
+function escHtml(s) {
+  if (!s) return '';
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function truncate(s, n) {
+  return s.length > n ? s.slice(0, n) + '…' : s;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ── MODULE : INGESTION ───────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+const ingest = {
+  file: null,
+
+  init() {
+    const dropZone = $('dropZone');
+    const fileInput = $('fileInput');
+
+    dropZone.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', e => this.setFile(e.target.files[0]));
+
+    dropZone.addEventListener('dragover', e => {
+      e.preventDefault();
+      dropZone.classList.add('drag-over');
+    });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+    dropZone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropZone.classList.remove('drag-over');
+      this.setFile(e.dataTransfer.files[0]);
+    });
+
+    $('btnClearFile').addEventListener('click', () => this.clearFile());
+    $('btnIngest').addEventListener('click', () => this.run());
+  },
+
+  setFile(f) {
+    if (!f) return;
+    const ext = f.name.split('.').pop().toLowerCase();
+    if (!['pdf', 'txt', 'md'].includes(ext)) {
+      toast('Extension non supportée (PDF, TXT, MD)', 'error');
+      return;
+    }
+    this.file = f;
+    $('fileName').textContent = f.name;
+    $('dropZone').style.display  = 'none';
+    $('filePreview').style.display = 'flex';
+    $('btnIngest').disabled = false;
+  },
+
+  clearFile() {
+    this.file = null;
+    $('fileInput').value = '';
+    $('dropZone').style.display  = '';
+    $('filePreview').style.display = 'none';
+    $('btnIngest').disabled = true;
+  },
+
+  async run() {
+    if (!this.file) return;
+
+    const entryId = 'log-' + Date.now();
+    this.addLogEntry(entryId, this.file.name, 'pending', 'Ingestion en cours…');
+
+    const fd = new FormData();
+    fd.append('file',         this.file);
+    fd.append('doc_type',     $('docType').value);
+    fd.append('institution',  $('institution').value);
+    fd.append('jurisdiction', $('jurisdiction').value);
+    fd.append('force_ocr',   $('forceOcr').checked ? 'true' : 'false');
+
+    $('btnIngest').disabled = true;
+
+    try {
+      const res = await fetch(API.BASE + API.INGEST, { method: 'POST', body: fd });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(err.detail || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+
+      this.updateLogEntry(entryId, 'ok',
+        `${data.chunks_created} chunk(s) · lang=${data.language_detected || '?'} · OCR=${data.ocr_used ? 'oui' : 'non'}`,
+        data.document_id
+      );
+      toast(`Document ingéré : ${data.chunks_created} chunks`, 'success');
+      this.clearFile();
+    } catch (err) {
+      this.updateLogEntry(entryId, 'error', err.message);
+      toast(`Erreur ingestion : ${err.message}`, 'error');
+      $('btnIngest').disabled = false;
+    }
+  },
+
+  addLogEntry(id, filename, status, detail) {
+    const log = $('ingestLog');
+    log.querySelector('.empty-hint')?.remove();
+    const el = document.createElement('div');
+    el.id = id;
+    el.className = `log-entry ${status}`;
+    el.innerHTML = `
+      <div class="log-entry-title"><i class="fas fa-file-alt"></i> ${escHtml(filename)}</div>
+      <div class="log-entry-meta">${escHtml(detail)}</div>`;
+    log.prepend(el);
+  },
+
+  updateLogEntry(id, status, detail, docId) {
+    const el = $(id);
+    if (!el) return;
+    el.className = `log-entry ${status}`;
+    const meta = el.querySelector('.log-entry-meta');
+    meta.textContent = detail + (docId ? ` · id: ${docId.slice(0,8)}…` : '');
+  },
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ── MODULE : ÉVALUATION ───────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+const evalModule = {
+  init() {
+    $('btnRunEval').addEventListener('click', () => this.run());
+  },
+
+  async run() {
+    const baseline = $('evalBaseline').value;
+    const dataset  = $('evalDataset').value.trim();
+    const kRaw     = $('evalK').value.split(',').map(s => parseInt(s.trim(), 10)).filter(Boolean);
+
+    $('btnRunEval').disabled = true;
+    $('evalSpinner').style.display = 'block';
+    $('evalResults').innerHTML = '<h3><i class="fas fa-table"></i> Résultats</h3><div class="spinner"></div>';
+
+    try {
+      const data = await apiCall(API.EVAL_RUN, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          baseline_id:  baseline,
+          dataset_path: dataset,
+          k_values:     kRaw,
+        }),
+      });
+      this.renderResults(data);
+      toast(`Évaluation ${baseline} terminée`, 'success');
+    } catch (err) {
+      $('evalResults').innerHTML = `
+        <h3><i class="fas fa-table"></i> Résultats</h3>
+        <p class="empty-hint" style="color:var(--danger)">Erreur : ${escHtml(err.message)}</p>`;
+      toast(`Erreur évaluation : ${err.message}`, 'error');
+    } finally {
+      $('btnRunEval').disabled = false;
+      $('evalSpinner').style.display = 'none';
+    }
+  },
+
+  renderResults(d) {
+    const ret = d.retrieval || {};
+    const gen = d.generation || {};
+    const sys = d.system?.end_to_end || {};
+    const constraints = d.constraints_met || {};
+
+    const kVals = Object.keys(ret.precision_at_k || {});
+
+    let html = `
+      <h3><i class="fas fa-table"></i> ${escHtml(d.baseline_description || d.baseline_id)}</h3>
+      <p style="font-size:.78rem;color:var(--gray-400);margin-bottom:12px">
+        ${d.num_queries} requêtes · ${d.timestamp?.slice(0,19)?.replace('T',' ') || ''}
+      </p>`;
+
+    // Retrieval metrics
+    html += `<div class="metrics-section"><h4>Retrieval</h4><div class="metrics-grid">`;
+    html += `<div class="metric-card"><div class="metric-value">${fmtPct(ret.mrr)}</div><div class="metric-label">MRR</div></div>`;
+    kVals.forEach(k => {
+      html += `<div class="metric-card">
+        <div class="metric-value">${fmtPct(ret.ndcg_at_k?.[k])}</div>
+        <div class="metric-label">nDCG@${k}</div>
+      </div>`;
+    });
+    kVals.forEach(k => {
+      html += `<div class="metric-card">
+        <div class="metric-value">${fmtPct(ret.hit_rate_at_k?.[k])}</div>
+        <div class="metric-label">HR@${k}</div>
+      </div>`;
+    });
+    html += `</div></div>`;
+
+    // Generation metrics
+    html += `<div class="metrics-section"><h4>Génération</h4><div class="metrics-grid">`;
+    const genMetrics = [
+      { val: gen.citation_precision,  label: 'Citation Prec.', target: '≥ 95%' },
+      { val: gen.hallucination_rate,  label: 'Hallucination',  target: '≤ 5%'  },
+      { val: gen.faithfulness,        label: 'Faithfulness',   target: '—'      },
+      { val: gen.isb,                 label: 'ISB',            target: '≥ 85%'  },
+    ];
+    genMetrics.forEach(m => {
+      html += `<div class="metric-card">
+        <div class="metric-value">${fmtPct(m.val)}</div>
+        <div class="metric-label">${m.label}</div>
+        ${m.target !== '—' ? `<div class="metric-status">${m.target}</div>` : ''}
+      </div>`;
+    });
+    html += `</div></div>`;
+
+    // Latency
+    html += `<div class="metrics-section"><h4>Latence (contraintes mémoire)</h4><div class="metrics-grid">`;
+    [['p50', '≤ 5 000 ms'], ['p95', '≤ 15 000 ms'], ['p99', '—']].forEach(([p, target]) => {
+      const val = sys[`${p}_ms`];
+      html += `<div class="metric-card">
+        <div class="metric-value">${val !== undefined ? val.toFixed(0) + ' ms' : '—'}</div>
+        <div class="metric-label">${p.toUpperCase()}</div>
+        ${target !== '—' ? `<div class="metric-status">${target}</div>` : ''}
+      </div>`;
+    });
+    html += `</div></div>`;
+
+    // Constraints
+    html += `<div class="metrics-section"><h4>Contraintes du mémoire</h4><div class="constraints-list">`;
+    Object.entries(constraints).forEach(([key, ok]) => {
+      html += `<div class="constraint-row">
+        <i class="fas ${ok ? 'fa-circle-check ok' : 'fa-circle-xmark nok'}"></i>
+        <span>${escHtml(key.replace(/_/g,' '))}</span>
+        <span style="margin-left:auto;font-weight:600;color:var(--${ok?'success':'danger'})">${ok ? 'OK' : 'NON RESPECTÉE'}</span>
+      </div>`;
+    });
+    html += `</div></div>`;
+
+    $('evalResults').innerHTML = html;
+  },
+};
+
+function fmtPct(v) {
+  if (v === undefined || v === null) return '—';
+  return (v * 100).toFixed(1) + '%';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ── MODULE : SANTÉ ────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+const HEALTH_ICONS = {
+  milvus:        'fas fa-database',
+  elasticsearch: 'fas fa-magnifying-glass',
+  postgres:      'fas fa-server',
+  embedding:     'fas fa-brain',
+  api:           'fas fa-plug',
+};
+
+const health = {
+  init() {
+    $('btnRefreshHealth').addEventListener('click', () => this.refresh());
+    this.refresh();
+  },
+
+  async refresh() {
+    $('healthGrid').innerHTML = `<div class="health-card loading"><div class="spinner-sm"></div><span>Chargement…</span></div>`;
+    $('healthRaw').textContent = '…';
+    $('sidebarHealthDot').className = 'health-dot';
+    $('sidebarHealthLabel').textContent = 'Vérification…';
+
+    try {
+      const data = await apiCall(API.HEALTH);
+      this.render(data);
+      const ok = data.status === 'ok';
+      $('sidebarHealthDot').className = `health-dot ${ok ? 'ok' : 'degraded'}`;
+      $('sidebarHealthLabel').textContent = ok ? 'Opérationnel' : 'Dégradé';
+    } catch (err) {
+      $('healthGrid').innerHTML = `<div class="health-card error">
+        <div class="health-card-icon"><i class="fas fa-triangle-exclamation"></i></div>
+        <div class="health-card-name">Backend</div>
+        <div class="health-card-status">Inaccessible</div>
+      </div>`;
+      $('healthRaw').textContent = err.message;
+      $('sidebarHealthDot').className = 'health-dot error';
+      $('sidebarHealthLabel').textContent = 'Hors ligne';
+    }
+  },
+
+  render(data) {
+    $('healthRaw').textContent = JSON.stringify(data, null, 2);
+
+    // API global
+    const services = data.services || {};
+    services['api'] = data.status || 'ok';
+
+    const grid = $('healthGrid');
+    grid.innerHTML = '';
+
+    Object.entries(services).forEach(([name, status]) => {
+      const isOk = status === 'ok';
+      const isDeg = status === 'degraded' || String(status).startsWith('error');
+      const cls = isOk ? 'ok' : isDeg ? 'error' : 'degraded';
+      const icon = HEALTH_ICONS[name] || 'fas fa-circle-nodes';
+
+      grid.innerHTML += `
+        <div class="health-card ${cls}">
+          <div class="health-card-icon"><i class="${icon}"></i></div>
+          <div class="health-card-name">${escHtml(name)}</div>
+          <div class="health-card-status">${escHtml(status)}</div>
+        </div>`;
+    });
+
+    // Version / model
+    if (data.version || data.model) {
+      grid.innerHTML += `
+        <div class="health-card ok" style="grid-column:1/-1;flex-direction:row;gap:16px;justify-content:center">
+          ${data.version ? `<span style="font-size:.8rem;color:var(--gray-600)">v${escHtml(data.version)}</span>` : ''}
+          ${data.model   ? `<span style="font-size:.8rem;color:var(--gray-600)"><i class="fas fa-robot"></i> ${escHtml(data.model)}</span>` : ''}
+        </div>`;
+    }
+  },
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ── Bootstrap ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  initNav();
+  query.init();
+  ingest.init();
+  evalModule.init();
+  health.init();
+
+  // Adjust chat input row layout
+  const bar = document.querySelector('.chat-input-bar');
+  if (bar) {
+    const row = document.createElement('div');
+    row.className = 'input-row';
+    const ta   = $('queryInput');
+    const btn  = $('btnSend');
+    row.appendChild(ta);
+    row.appendChild(btn);
+    bar.appendChild(row);
+  }
+});

@@ -1,159 +1,266 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Assistant Juridique Camerounais</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GOV-AI 2.0 — Test Interface</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div class="app-container">
-        <!-- Sidebar -->
-        <aside class="sidebar">
-            <div class="logo-container">
-                <img src="/api/placeholder/80/80" alt="Logo" class="logo">
-                <h1>LexCam</h1>
-            </div>
-            <nav class="nav-menu">
-                <ul>
-                    <li class="active" data-section="chat"><i class="fas fa-comments"></i> Questions</li>
-                    <li data-section="documents"><i class="fas fa-file-alt"></i> Documents</li>
-                    <li data-section="search"><i class="fas fa-search"></i> Recherche</li>
-                    <li data-section="history"><i class="fas fa-history"></i> Historique</li>
-                </ul>
-            </nav>
-            <div class="user-info">
-                <img src="/api/placeholder/40/40" alt="User" class="user-avatar">
-                <span>Utilisateur</span>
-            </div>
-        </aside>
+<div class="app-container">
 
-        <!-- Main Content -->
-        <main class="main-content">
-            <!-- Chat Section -->
-            <section id="chat" class="content-section active">
-                <div class="section-header">
-                    <h2><i class="fas fa-comments"></i> Assistant Juridique</h2>
-                </div>
-                <div class="chat-container">
-                    <div class="chat-messages" id="chatMessages">
-                        <div class="message system">
-                           <!-- <div class="message-content">
-                                <p>Bienvenue sur l'Assistant Juridique Camerounais. Je peux répondre à vos questions concernant la législation camerounaise.</p>
-                            </div>-->
-                        </div>
-                    </div>
-                    <div class="chat-actions" style="padding: 10px 15px; border-top: 1px solid var(--border-color); display: flex; justify-content: flex-end;">
-                        <button id="resetChat" class="btn secondary">
-                            <i class="fas fa-redo-alt"></i> Réinitialiser conversation
-                        </button>
-                    </div>
-                    <div class="chat-input">
-                        <textarea id="questionInput" placeholder="Posez votre question juridique ici..."></textarea>
-                        <button id="sendQuestion"><i class="fas fa-paper-plane"></i></button>
-                    </div>
-                </div>
-                
-            </section>
-
-            <!-- Documents Section -->
-            <section id="documents" class="content-section">
-                <div class="section-header">
-                    <h2><i class="fas fa-file-alt"></i> Documents Juridiques</h2>
-                </div>
-                <div class="documents-container">
-                    <div class="upload-zone">
-                        <i class="fas fa-cloud-upload-alt"></i>
-                        <h3>Déposer vos documents</h3>
-                        <p>Glissez-déposez plusieurs fichiers PDF ou cliquez pour sélectionner</p>
-                        <input type="file" id="fileUpload" accept=".pdf" multiple hidden>
-                        <button id="uploadBtn" class="btn primary">Sélectionner des fichiers</button>
-                        <div id="selectedFiles" class="selected-files"></div>
-                    </div>
-                    <div class="documents-list-container">
-                        <h3>Documents disponibles</h3>
-                        <div class="filter-container">
-                            <input type="text" id="docSearch" placeholder="Rechercher un document...">
-                            <select id="docFilter">
-                                <option value="all">Tous les documents</option>
-                                <option value="scanned">Documents scannés</option>
-                                <option value="digital">Documents numériques</option>
-                            </select>
-                        </div>
-                        <div class="documents-list" id="documentsList">
-                            <!-- Documents will be loaded here -->
-                            <div class="loading-indicator">Chargement des documents...</div>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- Search Section -->
-            <section id="search" class="content-section">
-                <div class="section-header">
-                    <h2><i class="fas fa-search"></i> Recherche Juridique</h2>
-                </div>
-                <div class="search-container">
-                    <div class="search-input-container">
-                        <input type="text" id="searchInput" placeholder="Rechercher dans les textes juridiques...">
-                        <button id="searchButton" class="btn primary"><i class="fas fa-search"></i> Rechercher</button>
-                    </div>
-                    <div class="search-options">
-                        <label>
-                            <input type="checkbox" id="useRerank" checked>
-                            Améliorer les résultats (reranking)
-                        </label>
-                        <div class="results-count">
-                            <label for="topK">Nombre de résultats:</label>
-                            <select id="topK">
-                                <option value="5">5</option>
-                                <option value="10" selected>10</option>
-                                <option value="20">20</option>
-                                <option value="50">50</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="search-results" id="searchResults">
-                        <!-- Search results will be loaded here -->
-                    </div>
-                </div>
-            </section>
-
-            <!-- History Section -->
-            <section id="history" class="content-section">
-                <div class="section-header">
-                    <h2><i class="fas fa-history"></i> Historique des Questions</h2>
-                </div>
-                <div class="history-container">
-                    <div class="history-list" id="historyList">
-                        <!-- History items will be loaded here -->
-                        <div class="loading-indicator">Chargement de l'historique...</div>
-                    </div>
-                </div>
-            </section>
-        </main>
-
-        <!-- Right Panel for Document Preview -->
-        <aside class="right-panel" id="rightPanel">
-            <div class="panel-header">
-                <h3 id="previewTitle">Détails du document</h3>
-                <button id="closePanel"><i class="fas fa-times"></i></button>
-            </div>
-            <div class="panel-content" id="panelContent">
-                <!-- Panel content will be loaded here -->
-            </div>
-        </aside>
+  <!-- ── Sidebar ─────────────────────────────────────────────────── -->
+  <aside class="sidebar">
+    <div class="logo-box">
+      <div class="logo-icon"><i class="fas fa-landmark"></i></div>
+      <div>
+        <div class="logo-title">GOV-AI 2.0</div>
+        <div class="logo-sub">Administration camerounaise</div>
+      </div>
     </div>
 
-    <!-- Modals -->
-    <div class="modal" id="loadingModal">
-        <div class="modal-content">
-            <div class="spinner"></div>
-            <p id="loadingMessage">Traitement en cours...</p>
+    <nav>
+      <ul class="nav-list">
+        <li class="nav-item active" data-tab="query">
+          <i class="fas fa-comments"></i><span>Requête</span>
+        </li>
+        <li class="nav-item" data-tab="ingest">
+          <i class="fas fa-file-upload"></i><span>Ingestion</span>
+        </li>
+        <li class="nav-item" data-tab="eval">
+          <i class="fas fa-chart-bar"></i><span>Évaluation</span>
+        </li>
+        <li class="nav-item" data-tab="health">
+          <i class="fas fa-heartbeat"></i><span>Santé</span>
+        </li>
+      </ul>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="health-dot" id="sidebarHealthDot" title="État du backend"></div>
+      <span id="sidebarHealthLabel">Vérification…</span>
+    </div>
+  </aside>
+
+  <!-- ── Main ──────────────────────────────────────────────────────── -->
+  <main class="main-content">
+
+    <!-- ══ TAB : REQUÊTE ══════════════════════════════════════════════ -->
+    <section id="tab-query" class="tab active">
+      <div class="tab-header">
+        <h2><i class="fas fa-comments"></i> Requête juridique</h2>
+
+        <!-- Paramètres de requête -->
+        <div class="query-params">
+          <div class="param-group">
+            <label>Langue</label>
+            <select id="qLang">
+              <option value="fr">Français (FR)</option>
+              <option value="en">English (EN)</option>
+              <option value="unknown">Auto-detect</option>
+            </select>
+          </div>
+          <div class="param-group">
+            <label>Profil</label>
+            <select id="qProfile">
+              <option value="citizen">Citoyen</option>
+              <option value="agent">Agent public</option>
+              <option value="enterprise">Entreprise</option>
+              <option value="jurist">Juriste</option>
+            </select>
+          </div>
+          <div class="param-group param-toggle">
+            <label>Streaming</label>
+            <label class="toggle">
+              <input type="checkbox" id="qStream" checked>
+              <span class="slider"></span>
+            </label>
+          </div>
+          <button class="btn-ghost" id="btnResetSession" title="Nouvelle session">
+            <i class="fas fa-rotate-right"></i> Nouvelle session
+          </button>
         </div>
-    </div>
+      </div>
 
-    <script src="app.js"></script>
+      <!-- Messages -->
+      <div class="chat-messages" id="chatMessages">
+        <div class="welcome-msg">
+          <i class="fas fa-robot"></i>
+          <h3>Bienvenue sur GOV-AI 2.0</h3>
+          <p>Posez votre question juridique ou administrative relative au Cameroun.</p>
+          <p class="hint">Les réponses incluent des <strong>citations obligatoires</strong> ancrant chaque affirmation dans le corpus documentaire.</p>
+        </div>
+      </div>
+
+      <!-- Barre d'entrée -->
+      <div class="chat-input-bar">
+        <div class="session-badge" id="sessionBadge" style="display:none">
+          <i class="fas fa-link"></i>
+          <span id="sessionIdDisplay"></span>
+          <span class="session-turns" id="sessionTurns" title="Nombre d'échanges dans la session"></span>
+        </div>
+        <textarea id="queryInput" placeholder="Ex : Comment créer une SARL selon l'OHADA au Cameroun ?" rows="2"></textarea>
+        <button class="btn-send" id="btnSend">
+          <i class="fas fa-paper-plane"></i>
+        </button>
+      </div>
+    </section>
+
+    <!-- ══ TAB : INGESTION ═════════════════════════════════════════════ -->
+    <section id="tab-ingest" class="tab">
+      <div class="tab-header">
+        <h2><i class="fas fa-file-upload"></i> Ingestion de documents</h2>
+      </div>
+
+      <div class="ingest-layout">
+        <!-- Formulaire upload -->
+        <div class="ingest-form card">
+          <h3><i class="fas fa-cloud-upload-alt"></i> Nouveau document</h3>
+
+          <div class="drop-zone" id="dropZone">
+            <i class="fas fa-file-pdf drop-icon"></i>
+            <p>Glissez un fichier ici<br>ou cliquez pour sélectionner</p>
+            <p class="hint">PDF, TXT, MD — max 50 Mo</p>
+            <input type="file" id="fileInput" accept=".pdf,.txt,.md" hidden>
+          </div>
+          <div id="filePreview" class="file-preview" style="display:none">
+            <i class="fas fa-file-alt"></i>
+            <span id="fileName"></span>
+            <button class="btn-icon" id="btnClearFile" title="Retirer"><i class="fas fa-times"></i></button>
+          </div>
+
+          <div class="form-grid">
+            <div class="form-group">
+              <label>Type de document</label>
+              <select id="docType">
+                <option value="autre">Autre</option>
+                <option value="constitution">Constitution</option>
+                <option value="loi_organique">Loi organique</option>
+                <option value="loi">Loi</option>
+                <option value="ordonnance">Ordonnance</option>
+                <option value="decret">Décret</option>
+                <option value="arrete">Arrêté</option>
+                <option value="circulaire">Circulaire</option>
+                <option value="acte_ohada">Acte uniforme OHADA</option>
+                <option value="guide_procedure">Guide / procédure</option>
+                <option value="jurisprudence">Jurisprudence</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Institution émettrice</label>
+              <input type="text" id="institution" placeholder="Ex : Présidence, MINFI, Assemblée…">
+            </div>
+            <div class="form-group">
+              <label>Juridiction</label>
+              <select id="jurisdiction">
+                <option value="national">National</option>
+                <option value="NW/SW">NW / SW (Common Law)</option>
+                <option value="Centre">Région Centre</option>
+                <option value="Littoral">Région Littoral</option>
+                <option value="Ouest">Région Ouest</option>
+                <option value="Nord">Région Nord</option>
+                <option value="Adamaoua">Région Adamaoua</option>
+                <option value="Est">Région Est</option>
+                <option value="Sud">Région Sud</option>
+                <option value="ohada">OHADA</option>
+              </select>
+            </div>
+            <div class="form-group form-check">
+              <label class="toggle-label">
+                <input type="checkbox" id="forceOcr">
+                <span>Forcer l'OCR</span>
+              </label>
+              <small>Même si le texte est extractible (pour les scans de mauvaise qualité)</small>
+            </div>
+          </div>
+
+          <button class="btn-primary" id="btnIngest" disabled>
+            <i class="fas fa-upload"></i> Ingérer le document
+          </button>
+        </div>
+
+        <!-- Log résultats -->
+        <div class="ingest-log card">
+          <h3><i class="fas fa-list-check"></i> Journal d'ingestion</h3>
+          <div id="ingestLog" class="log-list">
+            <p class="empty-hint">Aucune ingestion pour l'instant.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ TAB : ÉVALUATION ═══════════════════════════════════════════ -->
+    <section id="tab-eval" class="tab">
+      <div class="tab-header">
+        <h2><i class="fas fa-chart-bar"></i> Évaluation (Baselines B0→B4)</h2>
+      </div>
+
+      <div class="eval-layout">
+        <!-- Panneau de lancement -->
+        <div class="eval-form card">
+          <h3><i class="fas fa-play-circle"></i> Lancer une évaluation</h3>
+
+          <div class="form-group">
+            <label>Baseline</label>
+            <select id="evalBaseline">
+              <option value="B4">B4 — GOV-AI 2.0 complet (Eq. 4.2)</option>
+              <option value="B3">B3 — Hybride + Reranking</option>
+              <option value="B2">B2 — Hybride RRF (sans reranking)</option>
+              <option value="B1">B1 — Dense seul</option>
+              <option value="B0">B0 — BM25 seul</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Dataset</label>
+            <input type="text" id="evalDataset" value="eval/datasets/qa_bilingual_annotated.json" placeholder="Chemin vers le dataset JSON">
+          </div>
+          <div class="form-group">
+            <label>Valeurs de k (séparées par virgule)</label>
+            <input type="text" id="evalK" value="1,3,5,10">
+          </div>
+          <button class="btn-primary" id="btnRunEval">
+            <i class="fas fa-flask"></i> Lancer l'évaluation
+          </button>
+          <div id="evalSpinner" class="spinner" style="display:none"></div>
+        </div>
+
+        <!-- Résultats -->
+        <div class="eval-results card" id="evalResults">
+          <h3><i class="fas fa-table"></i> Résultats</h3>
+          <p class="empty-hint">Lancez une évaluation pour afficher les résultats.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ TAB : SANTÉ ════════════════════════════════════════════════ -->
+    <section id="tab-health" class="tab">
+      <div class="tab-header">
+        <h2><i class="fas fa-heartbeat"></i> Santé des services</h2>
+        <button class="btn-ghost" id="btnRefreshHealth">
+          <i class="fas fa-rotate-right"></i> Rafraîchir
+        </button>
+      </div>
+
+      <div class="health-grid" id="healthGrid">
+        <div class="health-card loading">
+          <div class="spinner-sm"></div>
+          <span>Chargement…</span>
+        </div>
+      </div>
+
+      <div class="health-raw card">
+        <h3><i class="fas fa-code"></i> Réponse brute</h3>
+        <pre id="healthRaw">—</pre>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- ── Toast notifications ────────────────────────────────────────── -->
+<div id="toastContainer" class="toast-container"></div>
+
+<script src="app.js"></script>
 </body>
 </html>

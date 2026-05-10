@@ -1,170 +1,230 @@
-from pydantic import BaseModel, Field, validator
-from typing import List, Dict, Any, Optional, Union
+"""
+GOV-AI 2.0 — Schémas Pydantic v2 pour les API request/response.
+Format de sortie standardisé : answer, citations, retrieved_chunks,
+graph_evidence, uncertainty_score, safety_flags.
+"""
+from __future__ import annotations
 
-# Modèles pour le service d'embedding
-class TextsRequest(BaseModel):
-    texts: List[str] = Field(..., description="Textes à transformer en embeddings")
+import uuid
+from datetime import datetime
+from typing import Any, Optional
 
-class EmbeddingsResponse(BaseModel):
-    embeddings: List[List[float]] = Field(..., description="Embeddings générés")
+from pydantic import BaseModel, Field, field_validator, model_validator
 
-# Modèles pour la recherche
-class SearchRequest(BaseModel):
-    query: str = Field(..., description="Requête de l'utilisateur", min_length=1)
-    top_k: Optional[int] = Field(10, description="Nombre de résultats à retourner")
-    use_rerank: Optional[bool] = Field(True, description="Utiliser le reranking")
-    use_llm_rerank: Optional[bool] = Field(False, description="Utiliser le LLM pour le reranking (plus précis mais plus lent)")
-    filter: Optional[Dict[str, Any]] = Field(None, description="Filtres à appliquer (ex: {\"filename\": \"document.pdf\"})")
+from app.models.domain import (
+    ConfidenceLevel,
+    DocumentType,
+    IntentType,
+    JuridicalSystem,
+    Language,
+    SafetyFlag,
+    UserProfile,
+)
 
-class DocumentMetadata(BaseModel):
-    document_id: str = ""
-    chunk_id: str = ""
-    filename: str = "Document inconnu"
-    page_number: int = 0
-    extraction_method: Optional[str] = None
-    section_type: Optional[str] = None
-    section_number: Optional[str] = None
-    section_title: Optional[str] = None
 
-class SourceDocument(BaseModel):
-    text: str
-    score: float
-    metadata: DocumentMetadata
-    score_details: Optional[Dict[str, float]] = None
+# ── Modèles de base ───────────────────────────────────────────────────────────
 
-class SearchResult(BaseModel):
-    text: str
-    score: float
-    metadata: DocumentMetadata
-    original_score: Optional[float] = None
+class Citation(BaseModel):
+    """Une citation vérifiable pointant vers une source documentaire."""
+    source_id: str = Field(..., description="ID unique du document source")
+    doc_title: str = Field(..., description="Titre du document")
+    doc_type: Optional[DocumentType] = None
+    institution: Optional[str] = None
+    jurisdiction: Optional[str] = None
+    language: Language = Language.FR
+    page: Optional[int] = None
+    article: Optional[str] = None
+    chunk_id: str = Field(..., description="ID du chunk source")
+    excerpt: str = Field(..., description="Extrait du passage cité (max 300 chars)")
+    relevance_score: float = Field(..., ge=0.0, le=1.0)
+    date_document: Optional[str] = None
+
+    @field_validator("excerpt")
+    @classmethod
+    def truncate_excerpt(cls, v: str) -> str:
+        return v[:300] if len(v) > 300 else v
+
+
+class RetrievedChunk(BaseModel):
+    """Un chunk récupéré avec ses métadonnées et score."""
+    chunk_id: str
+    doc_id: str
+    content: str
+    source: str
+    language: Language = Language.FR
+    page: Optional[int] = None
+    chunk_index: int = 0
+    dense_score: Optional[float] = None
+    sparse_score: Optional[float] = None
+    rrf_score: Optional[float] = None
     rerank_score: Optional[float] = None
-    score_details: Optional[Dict[str, float]] = None
-    matched_query: Optional[str] = None
+    final_score: float = 0.0
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
-class SearchResponse(BaseModel):
-    results: List[SearchResult]
-    query: str
-    total_results: int
-    search_time: float
-    metadata: Dict[str, Any] = {}
 
-# Modèles pour le service LLM
-class LLMRequest(BaseModel):
-    prompt: str = Field(..., description="Prompt pour le LLM")
-    max_length: Optional[int] 
-    temperature: Optional[float] = Field(0.7, description="Température pour le sampling")
-    stream: Optional[bool] = Field(False, description="Activer le streaming de la réponse")
+class ChunkMetadata(BaseModel):
+    """Métadonnées associées à un chunk lors de l'ingestion."""
+    source: str
+    language: Language = Language.UNKNOWN
+    doc_type: Optional[DocumentType] = None
+    institution: Optional[str] = None
+    jurisdiction: Optional[str] = None
+    date_document: Optional[str] = None
+    version: Optional[str] = None
+    page: Optional[int] = None
+    chunk_index: int = 0
+    total_chunks: int = 1
+    chunk_strategy: str = "fixed_size"
 
-class LLMResponse(BaseModel):
-    response: str = Field(..., description="Réponse générée par le LLM")
-    metadata: Optional[Dict[str, Any]] = None
 
-# Modèles pour la conversation avec LLM
-# Modèle pour la requête de conversation
-class ConversationRequest(BaseModel):
-    """
-    Modèle pour une requête de conversation avec historique.
-    """
-    message: str = Field(..., description="Message de l'utilisateur")
-    conversation_history: Optional[List[Dict[str, str]]] = Field(
-        default_factory=list, 
-        description="Historique des conversations précédentes"
+# ── Requêtes ──────────────────────────────────────────────────────────────────
+
+class QueryRequest(BaseModel):
+    """Requête principale GOV-AI 2.0."""
+    query: str = Field(
+        ..., min_length=3, max_length=2000, description="Question de l'utilisateur"
+    )
+    user_id: Optional[str] = Field(default=None)
+    session_id: Optional[str] = Field(default=None)
+    language: Optional[Language] = Field(default=None)
+    profile: UserProfile = Field(default=UserProfile.CITIZEN)
+    juridical_system: Optional[JuridicalSystem] = Field(default=None)
+    top_k: int = Field(default=5, ge=1, le=20)
+    filters: dict[str, Any] = Field(default_factory=dict)
+    stream: bool = Field(default=False)
+    include_chunks: bool = Field(default=True)
+    session_context: Optional[str] = Field(
+        default=None,
+        max_length=4000,
+        description=(
+            "Résumé des échanges précédents pour la cohérence multi-tour. "
+            "Format : 'Q: <question>\nR: <réponse>' pour chaque tour, séparés par \\n\\n."
+        ),
     )
 
-    class Config:
-        # Configuration supplémentaire si nécessaire
-        arbitrary_types_allowed = True
-        json_schema_extra = {
-            "example": {
-                "message": "Pouvez-vous m'expliquer l'article 15 de la constitution ?",
-                "conversation_history": [
-                    {"query": "Qu'est-ce que la constitution ?", "response": "La constitution est..."}
-                ]
-            }
-        }
+    @field_validator("query")
+    @classmethod
+    def sanitize_query(cls, v: str) -> str:
+        return v.strip()
 
-class ConversationResponse(BaseModel):
-    """
-    Modèle pour la réponse d'une conversation.
-    """
-    query: str = Field(..., description="La requête originale de l'utilisateur")
-    answer: str = Field(..., description="La réponse générée")
-    explanation: Optional[str] = Field(None, description="Explication de l'origine des informations")
-    source_documents: List[Dict] = Field(default_factory=list, description="Documents sources")
-    success: bool = Field(..., description="Indicateur de succès de la requête")
-    stats: Dict = Field(default_factory=dict, description="Statistiques supplémentaires")
-    
-# Modèles pour le service RAG
-class RAGRequest(BaseModel):
-    query: str = Field(..., description="Question de l'utilisateur")
-    use_expansion: Optional[bool] = Field(True, description="Utiliser l'expansion de requête")
-    use_reranking: Optional[bool] = Field(True, description="Utiliser le reranking")
-    max_results: Optional[int] = Field(5, description="Nombre maximum de sources à inclure")
+    @model_validator(mode="after")
+    def set_session_id(self) -> "QueryRequest":
+        if not self.session_id:
+            self.session_id = str(uuid.uuid4())
+        return self
 
-class RAGResponse(BaseModel):
-    query: str
+
+class IngestRequest(BaseModel):
+    """Métadonnées accompagnant un fichier à ingérer."""
+    source: str = Field(..., description="Nom/identifiant de la source")
+    doc_type: Optional[DocumentType] = None
+    institution: Optional[str] = None
+    jurisdiction: Optional[str] = None
+    language: Optional[Language] = None
+    date_document: Optional[str] = None
+    version: str = Field(default="1.0")
+    force_ocr: bool = Field(default=False)
+    chunking_strategy: str = Field(default="hybrid")
+
+
+class EvaluationRequest(BaseModel):
+    """Requête d'évaluation sur un jeu de données annoté."""
+    dataset_path: Optional[str] = None
+    baselines: list[str] = Field(default=["b0", "b1", "b2", "b3", "b4"])
+    top_k_values: list[int] = Field(default=[1, 3, 5, 10])
+    output_format: str = Field(default="json")
+
+
+# ── Réponses ──────────────────────────────────────────────────────────────────
+
+class QueryResponse(BaseModel):
+    """Réponse principale GOV-AI 2.0 — format standardisé."""
+    query_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     answer: str
-    source_documents: List[SourceDocument] = []
-    stats: Dict[str, Any] = {}
-    success: bool = True
-    error: Optional[str] = None
+    citations: list[Citation] = Field(default_factory=list)
+    retrieved_chunks: list[RetrievedChunk] = Field(default_factory=list)
+    graph_evidence: list[dict[str, Any]] = Field(default_factory=list)
+    uncertainty_score: float = Field(..., ge=0.0, le=1.0)
+    confidence_level: ConfidenceLevel = ConfidenceLevel.MEDIUM
+    safety_flags: list[SafetyFlag] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    language_detected: Language = Language.FR
+    juridical_system_detected: Optional[JuridicalSystem] = None
+    intent_detected: Optional[IntentType] = None
+    latency_ms: Optional[float] = None
+    model_used: Optional[str] = None
+    session_id: Optional[str] = None
 
-# Modèles pour le service de documents
-class ProcessPDFResponse(BaseModel):
+    @model_validator(mode="after")
+    def set_confidence_level(self) -> "QueryResponse":
+        self.confidence_level = ConfidenceLevel.from_score(self.uncertainty_score)
+        return self
+
+
+class IngestResponse(BaseModel):
+    """Réponse après ingestion d'un document."""
+    document_id: str
+    filename: str
+    chunks_created: int
+    language_detected: Language
+    doc_type: Optional[DocumentType] = None
+    ocr_used: bool = False
+    ingestion_latency_ms: float
+    status: str = "completed"
+    warnings: list[str] = Field(default_factory=list)
+
+
+class DocumentInfo(BaseModel):
+    """Informations sur un document indexé."""
+    document_id: str
+    filename: str
+    source: str
+    language: Language
+    doc_type: Optional[DocumentType] = None
+    institution: Optional[str] = None
+    jurisdiction: Optional[str] = None
+    chunks_count: int
+    ingested_at: datetime
+    version: str = "1.0"
     status: str
-    document_id: Optional[str] = None
-    filename: Optional[str] = None
-    chunks_processed: int = 0
-    success: bool
-    error: Optional[str] = None
-    message: str
-
-class RAGRequest(BaseModel):
-    query: str
-    use_expansion: bool = True
-    use_reranking: bool = True
-    max_results: int = 5
-
-class DocumentsStatsResponse(BaseModel):
-    total_documents: int
-    total_chunks: int
-    scanned_documents: int
-    documents_list: List[Dict[str, Any]]
-
-class ChatRequest(BaseModel):
-    """Modèle de requête pour les endpoints de chat."""
-    query: str = Field(..., description="Requête ou question de l'utilisateur")
-    session_id: Optional[int] = Field(None, description="ID de session pour maintenir la conversation")
-    streaming: bool = Field(False, description="Activer le streaming de la réponse")
-    max_length: Optional[int] = Field(None, description="Limite optionnelle de longueur (aucune limite si None)")
-    user_id: Optional[str] = Field(None, description="Identifiant optionnel de l'utilisateur")
 
 
+class MetricsResponse(BaseModel):
+    """Métriques d'évaluation Sprint 1."""
+    precision_at_k: dict[int, float] = Field(default_factory=dict)
+    recall_at_k: dict[int, float] = Field(default_factory=dict)
+    mrr: Optional[float] = None
+    ndcg_at_k: dict[int, float] = Field(default_factory=dict)
+    hit_rate_at_k: dict[int, float] = Field(default_factory=dict)
+    reranker_gain: Optional[float] = None
+    faithfulness_score: Optional[float] = None
+    citation_precision: Optional[float] = None
+    citation_recall: Optional[float] = None
+    hallucination_rate: Optional[float] = None
+    latency_p50_ms: Optional[float] = None
+    latency_p95_ms: Optional[float] = None
+    latency_p99_ms: Optional[float] = None
+    isb: Optional[float] = None
+    evaluated_at: datetime = Field(default_factory=datetime.utcnow)
+    baseline: Optional[str] = None
+    dataset_size: int = 0
 
-# Tester avec un exemple proche de votre erreur
-test_data = {
-    "query": "Test query",
-    "answer": "Test response",
-    "source_documents": [
-        {
-            "text": "Sample text",
-            "score": 0.8,
-            "metadata": {
-                "document_id": "doc123",
-                "chunk_id": "chunk456",
-                "filename": "test.pdf",
-                "page_number": 1
-            },
-            "score_details": {"bm25": 0.9, "tfidf": 0.8, "original": 0.7, "legal": 0.6, "article": 0.0, "llm": 0.0}
-        }
-    ],
-    "stats": {},
-    "success": True
-}
 
-try:
-    response = RAGResponse(**test_data)
-    print("Validation successful!")
-    print(response.model_dump())
-except Exception as e:
-    print(f"Validation error: {e}")
+class HealthResponse(BaseModel):
+    """Réponse du health check."""
+    status: str
+    version: str = "2.0.0"
+    services: dict[str, str] = Field(default_factory=dict)
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
+# ── Rétrocompatibilité v1 ─────────────────────────────────────────────────────
+
+class TextsRequest(BaseModel):
+    """Compatibilité v1 : embeddings directs."""
+    texts: list[str] = Field(..., description="Textes à transformer en embeddings")
+
+
+class EmbeddingsResponse(BaseModel):
+    """Compatibilité v1."""
+    embeddings: list[list[float]] = Field(..., description="Embeddings générés")

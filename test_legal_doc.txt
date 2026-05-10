@@ -1,0 +1,33 @@
+OHADA - Acte Uniforme relatif au Droit des Sociétés Commerciales
+
+Article 1 : Le présent Acte uniforme s'applique aux sociétés commerciales et au groupement d'intérêt économique dont le siège social est situé sur le territoire de l'un des Etats-parties au Traité relatif à l'harmonisation du droit des affaires en Afrique.
+
+Article 311 - Définition de la SARL
+La société à responsabilité limitée est une société dans laquelle les associés ne sont responsables des dettes sociales qu'à concurrence de leurs apports et dont les droits sont représentés par des parts sociales.
+
+Article 312 - Nombre d'associés
+La société à responsabilité limitée peut être constituée par une seule personne physique ou morale ou entre deux et cent personnes physiques ou morales.
+
+Article 313 - Capital minimum
+Le montant du capital social est fixé librement par les associés dans les statuts. Il doit être intégralement souscrit et peut être constitué d'apports en nature et en numéraire.
+
+Article 314 - Constitution
+La société à responsabilité limitée est constituée par des statuts établis par acte notarié ou par tout acte offrant des garanties d'authenticité dans l'Etat du siège de la société.
+
+Procédure de création d'une SARL au Cameroun :
+1. Rédiger les statuts de la société (acte notarié obligatoire)
+2. Déposer le capital social à la banque (pas de minimum légal fixé par l'OHADA)
+3. Immatriculer la société au Registre du Commerce et du Crédit Mobilier (RCCM)
+4. Publier l'avis de constitution dans un journal d'annonces légales
+5. Obtenir le numéro d'identification unique (NIU) auprès de la DGI
+6. S'inscrire à la CNPS pour les cotisations sociales
+
+Sanctions prévues pour fraude fiscale (Code Général des Impôts - Cameroun) :
+- Amende fiscale : de 25% à 100% des droits éludés
+- Sanctions pénales : emprisonnement de 1 à 5 ans en cas de fraude caractérisée
+- Solidarité de paiement entre dirigeants et société
+
+Système juridique camerounais :
+Le Cameroun est un État bijuridique :
+- Droit civil (8 régions francophones) : Centre, Littoral, Ouest, Nord, Adamaoua, Est, Sud, Extrême-Nord
+- Common law (2 régions anglophones) : Nord-Ouest (Northwest) et Sud-Ouest (Southwest)

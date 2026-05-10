@@ -1,0 +1,254 @@
+# GOV-AI 2.0 — Docker Compose Sprint 1
+# Stack complète : API + Milvus + Elasticsearch + PostgreSQL + Ollama
+# Déploiement on-premise CENADI (souveraineté numérique)
+
+name: govai2-sprint1
+
+services:
+
+  # ── GOV-AI 2.0 API ──────────────────────────────────────────────────────────
+  govai-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: govai2-api
+    ports:
+      - "8000:8000"
+    # En dev : surcharger la commande pour activer le hot-reload
+    command: >
+      python -m uvicorn app.main:app
+      --host 0.0.0.0 --port 8000
+      --reload --reload-dir /app/app
+      --log-level info
+    environment:
+      - APP_ENV=development
+      - APP_HOST=0.0.0.0
+      - APP_PORT=8000
+      # PostgreSQL
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=govai2
+      - POSTGRES_USER=govai
+      - POSTGRES_PASSWORD=govai_secret
+      - DATABASE_URL=postgresql+asyncpg://govai:govai_secret@postgres:5432/govai2
+      # Milvus
+      - MILVUS_HOST=milvus
+      - MILVUS_PORT=19530
+      # Elasticsearch
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      # LLM (Ollama)
+      - LLM_PROVIDER=ollama
+      - LLM_BASE_URL=http://ollama:11434
+      - LLM_MODEL=llama3.2:latest
+      # Embedding
+      - EMBEDDING_PROVIDER=ollama
+      - EMBEDDING_MODEL=mxbai-embed-large
+      - EMBEDDING_DIM=1024
+      # Logging
+      - LOG_LEVEL=INFO
+      - LOG_FORMAT=json
+    volumes:
+      # Bind-mount du code source → hot-reload sans rebuild (dev)
+      - .:/app
+      - govai_storage:/app/storage
+      - govai_logs:/app/logs
+      - govai_eval:/app/eval
+    depends_on:
+      postgres:
+        condition: service_healthy
+      milvus:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health/live"]
+      interval: 30s
+      timeout: 10s
+      start_period: 45s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - govai
+
+  # ── PostgreSQL (métadonnées, sessions, audit) ────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: govai2-postgres
+    environment:
+      POSTGRES_DB: govai2
+      POSTGRES_USER: govai
+      POSTGRES_PASSWORD: govai_secret
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U govai -d govai2"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - govai
+
+  # ── Milvus (base vectorielle HNSW) ──────────────────────────────────────────
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.18
+    container_name: milvus-etcd
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
+    volumes:
+      - etcd_data:/etcd
+    command: >
+      etcd
+      -advertise-client-urls=http://127.0.0.1:2379
+      -listen-client-urls http://0.0.0.0:2379
+      --data-dir /etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - govai
+
+  minio:
+    image: minio/minio:RELEASE.2024-11-07T00-52-20Z
+    container_name: milvus-minio
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    volumes:
+      - minio_data:/minio_data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    command: minio server /minio_data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - govai
+
+  milvus:
+    image: milvusdb/milvus:v2.5.6
+    container_name: milvus-standalone
+    command: ["milvus", "run", "standalone"]
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+    volumes:
+      - milvus_data:/var/lib/milvus
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    depends_on:
+      etcd:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - govai
+
+  # ── Elasticsearch (BM25 / retrieval lexical) ─────────────────────────────────
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.4
+    container_name: govai2-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms1g -Xmx1g
+      - cluster.name=govai2-cluster
+      - node.name=govai2-node-1
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 20s
+      start_period: 60s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - govai
+
+  # ── Ollama (LLM + Embedding, 100% local) ────────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: govai2-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      # ollama/ollama n'embarque pas curl — on utilise la CLI ollama directement
+      test: ["CMD", "ollama", "list"]
+      interval: 20s
+      timeout: 15s
+      start_period: 60s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - govai
+    # Pour GPU (décommenter si NVIDIA disponible au CENADI) :
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  # ── Init Ollama : pull des modèles au démarrage ───────────────────────────────
+  ollama-init:
+    image: curlimages/curl:latest
+    container_name: govai2-ollama-init
+    depends_on:
+      ollama:
+        condition: service_healthy
+    entrypoint: >
+      sh -c "
+        echo 'Pulling LLM model...' &&
+        curl -s -X POST http://ollama:11434/api/pull -d '{\"name\":\"llama3.2:latest\"}' &&
+        echo 'Pulling embedding model...' &&
+        curl -s -X POST http://ollama:11434/api/pull -d '{\"name\":\"mxbai-embed-large\"}' &&
+        echo 'Models ready.'
+      "
+    networks:
+      - govai
+    restart: "no"
+
+# ── Volumes ──────────────────────────────────────────────────────────────────
+volumes:
+  postgres_data:
+  etcd_data:
+  minio_data:
+  milvus_data:
+  elasticsearch_data:
+  ollama_data:
+  govai_storage:
+  govai_logs:
+  govai_eval:
+
+# ── Réseau isolé ─────────────────────────────────────────────────────────────
+networks:
+  govai:
+    driver: bridge
+    name: govai2-network

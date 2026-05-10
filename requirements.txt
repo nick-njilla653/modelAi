@@ -1,98 +1,94 @@
-aiohttp==3.9.1
-aioredis==2.0.1
-aiosignal==1.3.2
-annotated-types==0.7.0
-anyio==4.9.0
-async-timeout==5.0.1
-attrs==25.3.0
-beautifulsoup4==4.12.2
-certifi==2025.6.15
-charset-normalizer==3.4.2
-click==8.2.1
-dataclasses-json==0.6.7
-fastapi==0.115.12
-frozenlist==1.7.0
-greenlet==3.2.3
-grpcio==1.67.1
-h11==0.16.0
-html5lib==1.1
-httpcore==1.0.9
-httptools==0.6.4
-httpx==0.28.1
-idna==3.10
-imageio==2.37.0
-joblib==1.3.2
-jsonpatch==1.33
-jsonpointer==3.0.0
-langchain==0.1.14
-langchain-community==0.0.38
-langchain-core==0.1.52
-langchain-text-splitters==0.0.2
-langdetect==1.0.9
-langsmith==0.1.147
-lazy_loader==0.4
-lxml==4.9.3
-marshmallow==3.26.1
-milvus-lite==2.5.0
-multidict==6.5.1
-mypy_extensions==1.1.0
-networkx==3.5
-numpy==1.24.4
-orjson==3.10.18
-outcome==1.3.0.post0
-packaging==23.2
-pandas==2.3.0
-pillow==11.2.1
-propcache==0.3.2
-protobuf==6.31.1
-pydantic==2.11.4
-pydantic-settings==2.9.1
-pydantic_core==2.33.2
-pymilvus==2.5.6
-PyMuPDF==1.23.14
-PyMuPDFb==1.23.9
-PySocks==1.7.1
-pytesseract==0.3.13
-python-dateutil==2.9.0.post0
-python-dotenv==1.0.1
-python-multipart==0.0.20
-pytz==2025.2
-PyWavelets==1.8.0
-PyYAML==6.0.2
-redis==4.6.0
-regex==2024.11.6
-requests==2.32.3
-requests-toolbelt==1.0.0
-schedule==1.2.0
-scikit-image==0.21.0
-scikit-learn==1.3.2
-scipy==1.11.4
-selenium==4.15.2
-six==1.17.0
-sniffio==1.3.1
-sortedcontainers==2.4.0
-soupsieve==2.7
-SQLAlchemy==2.0.41
-sse-starlette==2.3.3
-starlette==0.46.2
-tenacity==8.5.0
-threadpoolctl==3.2.0
-tifffile==2025.6.11
-tiktoken==0.9.0
-tqdm==4.67.1
-trio==0.30.0
-trio-websocket==0.12.2
-typing-inspect==0.9.0
-typing-inspection==0.4.1
-typing_extensions==4.14.0
-tzdata==2025.2
-ujson==5.10.0
-urllib3==1.26.5
-uvicorn==0.34.2
-uvloop==0.21.0
-watchfiles==1.1.0
-webdriver-manager==4.0.1
-webencodings==0.5.1
-websockets==15.0.1
-wsproto==1.2.0
-yarl==1.20.1
+# =============================================================================
+# GOV-AI 2.0 — Dépendances Python (Sprint 1)
+# Python >= 3.11
+# Versions validées pour la cohérence inter-dépendances.
+# =============================================================================
+
+# --- Web framework ---
+fastapi>=0.115.0,<0.116.0
+uvicorn[standard]>=0.30.0
+python-multipart>=0.0.18
+httpx>=0.27.0,<0.29.0
+
+# --- Pydantic / Settings ---
+pydantic>=2.9.0,<3.0.0
+pydantic-settings>=2.6.0,<3.0.0
+
+# --- Base de données ---
+SQLAlchemy>=2.0.0,<3.0.0
+asyncpg>=0.29.0
+alembic>=1.13.0
+psycopg2-binary>=2.9.0
+greenlet>=3.0.0
+
+# --- Milvus (Vector DB) ---
+pymilvus>=2.4.0,<3.0.0
+
+# --- Elasticsearch (BM25) ---
+elasticsearch[async]>=8.13.0,<9.0.0
+
+# --- LLM / Embeddings ---
+# Ollama >= 0.4.0 : compatible httpx >= 0.27 sans plafond <0.28
+ollama>=0.4.0
+openai>=1.40.0,<2.0.0
+
+# sentence-transformers, torch, transformers : optionnels (provider=local)
+# Décommenter uniquement pour déploiement avec modèles locaux HuggingFace :
+# sentence-transformers>=3.0.0
+# torch>=2.1.0
+# transformers>=4.40.0
+# accelerate>=0.30.0
+# tokenizers>=0.19.0
+
+huggingface-hub>=0.24.0
+
+# --- LangChain / LangGraph ---
+# Versions cohérentes entre elles (réseau de dépendances strict)
+langchain>=0.3.7,<0.4.0
+langchain-core>=0.3.15,<0.4.0
+langchain-community>=0.3.7,<0.4.0
+langgraph>=0.2.40
+
+# --- Traitement documents ---
+PyMuPDF>=1.23.0,<2.0.0
+pytesseract>=0.3.10
+pillow>=10.0.0
+pdf2image>=1.16.0
+
+# --- NLP ---
+langdetect>=1.0.9
+tiktoken>=0.7.0
+
+# --- Sécurité ---
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+slowapi>=0.1.9
+
+# --- Monitoring / Logging ---
+structlog>=24.0.0
+python-json-logger>=2.0.7
+prometheus-client>=0.20.0
+
+# --- Utilitaires ---
+python-dotenv>=1.0.0
+click>=8.1.0
+rich>=13.0.0
+tqdm>=4.65.0
+aiofiles>=23.0.0
+tenacity>=8.2.0
+numpy>=1.26.0,<2.0.0
+pandas>=2.1.0,<3.0.0
+orjson>=3.9.0
+PyYAML>=6.0
+regex>=2023.0.0
+
+# --- HTTP / Async ---
+httpcore>=1.0.0
+aiohttp>=3.9.0
+anyio>=4.0.0
+sniffio>=1.3.0
+
+# --- Autres ---
+sse-starlette>=2.1.0
+typing_extensions>=4.8.0
+requests>=2.31.0

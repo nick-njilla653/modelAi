@@ -1,8 +1,8 @@
-# GOV-AI 2.0 — Docker Compose Sprint 1
-# Stack complète : API + Milvus + Elasticsearch + PostgreSQL + Ollama
+# GOV-AI 2.0 — Docker Compose Sprint 2
+# Stack complète : API + Milvus + Elasticsearch + PostgreSQL + Neo4j + Ollama
 # Déploiement on-premise CENADI (souveraineté numérique)
 
-name: govai2-sprint1
+name: govai2-sprint3
 
 services:
 
@@ -44,6 +44,20 @@ services:
       - EMBEDDING_PROVIDER=ollama
       - EMBEDDING_MODEL=mxbai-embed-large
       - EMBEDDING_DIM=1024
+      # Neo4j (Knowledge Graph)
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=neo4j_secret
+      - NEO4J_DATABASE=govai
+      # HuggingFace / reranker model cache
+      - SENTENCE_TRANSFORMERS_HOME=/app/storage/model_cache
+      - HF_HOME=/app/storage/model_cache
+      - TRANSFORMERS_CACHE=/app/storage/model_cache
+      # Sprint 3 : mémoire de session + recherche web
+      - SESSION_HISTORY_MAX_TURNS=5
+      - WEB_SEARCH_ENABLED=false
+      - WEB_SEARCH_MAX_RESULTS=3
+      - WEB_SEARCH_REGION=fr-FR
       # Logging
       - LOG_LEVEL=INFO
       - LOG_FORMAT=json
@@ -61,6 +75,8 @@ services:
       elasticsearch:
         condition: service_healthy
       ollama:
+        condition: service_healthy
+      neo4j:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health/live"]
@@ -216,6 +232,33 @@ services:
     #           count: 1
     #           capabilities: [gpu]
 
+  # ── Neo4j (Graphe de connaissances juridiques) ──────────────────────────────
+  neo4j:
+    image: neo4j:5.18-community
+    container_name: govai2-neo4j
+    environment:
+      NEO4J_AUTH: neo4j/neo4j_secret
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_dbms_memory_pagecache_size: 512M
+      NEO4J_dbms_memory_heap_initial__size: 256M
+      NEO4J_dbms_memory_heap_max__size: 512M
+      NEO4J_dbms_default__database: govai
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    ports:
+      - "7474:7474"   # Browser HTTP
+      - "7687:7687"   # Bolt
+    healthcheck:
+      test: ["CMD", "neo4j", "status"]
+      interval: 20s
+      timeout: 10s
+      start_period: 60s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - govai
+
   # ── Init Ollama : pull des modèles au démarrage ───────────────────────────────
   ollama-init:
     image: curlimages/curl:latest
@@ -243,6 +286,8 @@ volumes:
   milvus_data:
   elasticsearch_data:
   ollama_data:
+  neo4j_data:
+  neo4j_logs:
   govai_storage:
   govai_logs:
   govai_eval:

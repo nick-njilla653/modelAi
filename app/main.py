@@ -11,8 +11,6 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from starlette.responses import JSONResponse
-
 from app.core.config import get_settings
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import configure_logging, get_logger
@@ -30,7 +28,7 @@ async def lifespan(app: FastAPI):
     Gère le cycle de vie de l'application.
     Remplace les @app.on_event("startup") / @app.on_event("shutdown") dépréciés.
     """
-    logger.info("govai2_starting", version="2.0.0-sprint1", env=settings.app_env)
+    logger.info("govai2_starting", version="2.0.0-sprint3", env=settings.app_env)
 
     # ── Startup ──────────────────────────────────────────────────────────────
     # ── Migration PostgreSQL (create_all si tables absentes) ─────────────────
@@ -69,11 +67,14 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.warning("embedding_service_init_failed", error=str(exc))
 
-    # Rétrocompatibilité v1 : init LangChain si activé
+    # Connexion Neo4j + création du schéma (Sprint 2)
     try:
-        _init_v1_langchain()
+        from app.storage.neo4j_client import get_neo4j_driver, ensure_schema
+        get_neo4j_driver()
+        await ensure_schema()
+        logger.info("neo4j_connected")
     except Exception as exc:
-        logger.warning("v1_langchain_init_skipped", error=str(exc))
+        logger.warning("neo4j_init_failed", error=str(exc))
 
     logger.info("govai2_ready", host=settings.app_host, port=settings.app_port)
 
@@ -97,36 +98,13 @@ async def lifespan(app: FastAPI):
         logger.warning("elasticsearch_close_error", error=str(exc))
 
     try:
-        from app.services.langchain_init import reset_orchestrator
-        reset_orchestrator()
-    except Exception:
-        pass
+        from app.storage.neo4j_client import close_neo4j
+        await close_neo4j()
+        logger.info("neo4j_connection_closed")
+    except Exception as exc:
+        logger.warning("neo4j_close_error", error=str(exc))
 
     logger.info("govai2_stopped")
-
-
-def _init_v1_langchain() -> None:
-    """Initialise le service LangChain v1 si INIT_LANGCHAIN_ON_STARTUP est True."""
-    if not getattr(settings, "INIT_LANGCHAIN_ON_STARTUP", False):
-        return
-    from app.services.langchain_init import init_langchain
-    init_langchain(
-        data_path=getattr(settings, "DATA_PATH", "./data"),
-        metadata_path=getattr(settings, "METADATA_PATH", "./data/metadata"),
-        embedding_service_url=getattr(settings, "EMBEDDING_SERVICE_URL", settings.llm_base_url),
-        embedding_model=getattr(settings, "EMBEDDING_MODEL", settings.embedding_model),
-        milvus_host=settings.milvus_host,
-        milvus_port=settings.milvus_port,
-        milvus_collection=settings.milvus_collection_chunks,
-        llm_service_url=settings.llm_base_url,
-        llm_model=settings.llm_model,
-        embedding_dim=settings.embedding_dim,
-        milvus_connection_timeout=getattr(settings, "MILVUS_CONNECTION_TIMEOUT", 10),
-        milvus_max_retries=getattr(settings, "MILVUS_MAX_RETRIES", 3),
-        embedding_request_timeout=getattr(settings, "EMBEDDING_REQUEST_TIMEOUT", 30),
-        embedding_health_timeout=getattr(settings, "EMBEDDING_HEALTH_CHECK_TIMEOUT", 5),
-    )
-    logger.info("v1_langchain_initialized")
 
 
 # ── Factory de l'application ──────────────────────────────────────────────────
@@ -139,7 +117,7 @@ def create_app() -> FastAPI:
             "Assistant gouvernemental intelligent pour l'administration publique camerounaise. "
             "Bilingue FR/EN, bijuridique (droit civil / common law), souverain (100% on-premise)."
         ),
-        version="2.0.0-sprint1",
+        version="2.0.0-sprint3",
         docs_url="/docs",
         redoc_url="/redoc",
         openapi_url="/openapi.json",
@@ -173,15 +151,7 @@ def create_app() -> FastAPI:
     from app.api.v1 import api_router as api_router_v2
     app.include_router(api_router_v2, prefix=settings.api_v1_prefix)
 
-    # ── Routes v1 rétrocompatibilité ─────────────────────────────────────────
-    try:
-        from app.api.api import api_router as api_router_v1
-        app.include_router(api_router_v1, prefix=settings.api_prefix)
-        logger.info("v1_routes_registered", prefix=settings.api_prefix)
-    except ImportError:
-        logger.warning("v1_routes_not_found")
-
-    # ── Fichiers statiques (interface web v1) ─────────────────────────────────
+    # ── Fichiers statiques (interface web) ───────────────────────────────────
     _front_dir = Path(__file__).resolve().parent / "front"
     if _front_dir.exists():
         app.mount("/ui", StaticFiles(directory=str(_front_dir), html=True), name="front")
@@ -192,7 +162,7 @@ def create_app() -> FastAPI:
         return {
             "name": "GOV-AI 2.0",
             "description": "Assistant gouvernemental intelligent — Administration camerounaise",
-            "version": "2.0.0-sprint1",
+            "version": "2.0.0-sprint3",
             "documentation": "/docs",
             "health": "/api/v1/health",
             "status": "online",
@@ -201,7 +171,7 @@ def create_app() -> FastAPI:
     # Routes /health au niveau racine (rétrocompatibilité + Docker healthcheck)
     @app.get("/health", include_in_schema=False)
     async def root_health() -> dict:
-        return {"status": "ok", "timestamp": time.time(), "version": "2.0.0-sprint1"}
+        return {"status": "ok", "timestamp": time.time(), "version": "2.0.0-sprint3"}
 
     @app.get("/health/live", include_in_schema=False)
     async def root_health_live() -> dict:

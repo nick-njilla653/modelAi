@@ -29,7 +29,7 @@ class RerankingService:
         self._model: Any = None
 
     async def _ensure_model_loaded(self) -> None:
-        """Chargement lazy du cross-encoder."""
+        """Chargement lazy du cross-encoder (timeout 45 s — fallback RRF si lent)."""
         if self._model is not None:
             return
 
@@ -37,15 +37,24 @@ class RerankingService:
             from sentence_transformers import CrossEncoder
 
             loop = asyncio.get_event_loop()
-            self._model = await loop.run_in_executor(
-                None,
-                lambda: CrossEncoder(
-                    self.settings.reranker_model,
-                    device=self.settings.reranker_device,
-                    max_length=512,
+            self._model = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None,
+                    lambda: CrossEncoder(
+                        self.settings.reranker_model,
+                        device=self.settings.reranker_device,
+                        max_length=512,
+                    ),
                 ),
+                timeout=45.0,
             )
             logger.info("reranker_model_loaded", model=self.settings.reranker_model)
+        except asyncio.TimeoutError:
+            logger.warning(
+                "reranker_load_timeout",
+                model=self.settings.reranker_model,
+                fallback="rrf_score",
+            )
         except ImportError:
             logger.warning(
                 "reranker_model_unavailable",

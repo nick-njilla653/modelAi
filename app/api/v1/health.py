@@ -55,11 +55,28 @@ async def health_check() -> HealthResponse:
     except Exception as exc:
         services["embedding"] = f"error: {exc}"
 
+    # Neo4j (Sprint 2)
+    try:
+        from app.storage.neo4j_client import check_neo4j_connection
+        ok = await check_neo4j_connection()
+        services["neo4j"] = "ok" if ok else "degraded"
+    except Exception as exc:
+        services["neo4j"] = f"error: {exc}"
+
+    # Reranker (Sprint 2) — vérifie la disponibilité du package sans télécharger le modèle
+    try:
+        from sentence_transformers import CrossEncoder  # noqa: F401
+        services["reranker"] = "ok"
+    except ImportError:
+        services["reranker"] = "unavailable"
+    except Exception as exc:
+        services["reranker"] = f"error: {exc}"
+
     overall = "ok" if all(v == "ok" for v in services.values()) else "degraded"
 
     return HealthResponse(
         status=overall,
-        version="2.0.0-sprint1",
+        version="2.0.0-sprint3",
         services=services,
         model=settings.llm_model,
     )

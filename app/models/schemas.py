@@ -151,6 +151,7 @@ class QueryResponse(BaseModel):
     language_detected: Language = Language.FR
     juridical_system_detected: Optional[JuridicalSystem] = None
     intent_detected: Optional[IntentType] = None
+    action_plan: list[str] = Field(default_factory=list)
     latency_ms: Optional[float] = None
     model_used: Optional[str] = None
     session_id: Optional[str] = None
@@ -213,8 +214,9 @@ class MetricsResponse(BaseModel):
 class HealthResponse(BaseModel):
     """Réponse du health check."""
     status: str
-    version: str = "2.0.0"
+    version: str = "2.0.0-sprint3"
     services: dict[str, str] = Field(default_factory=dict)
+    model: Optional[str] = None
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 

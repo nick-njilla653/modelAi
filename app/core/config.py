@@ -118,6 +118,14 @@ class Settings(BaseSettings):
     rate_limit_per_minute: int = 60
     rate_limit_per_hour: int = 1000
 
+    # ── Session History (Sprint 3) ────────────────────────────────────────────
+    session_history_max_turns: int = 5
+
+    # ── Web Search Fallback (Sprint 3) ────────────────────────────────────────
+    web_search_enabled: bool = False   # opt-in (souveraineté numérique)
+    web_search_max_results: int = 3
+    web_search_region: str = "fr-FR"
+
     # ── Évaluation ───────────────────────────────────────────────────────────
     eval_dataset_path: str = "./eval/datasets/qa_bilingual_annotated.json"
     eval_reports_path: str = "./eval/reports"

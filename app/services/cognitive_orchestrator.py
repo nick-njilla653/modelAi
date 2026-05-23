@@ -122,6 +122,7 @@ class OrchestratorState:
     # AGIR
     retrieved_chunks: list[RetrievedChunk] = field(default_factory=list)
     retrieval_score: float = 0.0
+    kg_context_str: str = ""
 
     # GÉNÉRER
     response: Optional[QueryResponse] = None
@@ -151,9 +152,16 @@ class CognitiveOrchestrator:
         self.settings = get_settings()
         self._retrieval_service: Any = None
         self._generation_service: Any = None
-        self._graph: Any = None  # LangGraph compiled graph (optionnel)
+        self._reranking_service: Any = None
+        self._kg_service: Any = None
 
     # ── Services lazy ─────────────────────────────────────────────────────────
+
+    def _get_reranking_service(self) -> Any:
+        if self._reranking_service is None:
+            from app.services.reranking.reranking_service import RerankingService
+            self._reranking_service = RerankingService()
+        return self._reranking_service
 
     def _get_retrieval_service(self) -> Any:
         if self._retrieval_service is None:
@@ -161,6 +169,7 @@ class CognitiveOrchestrator:
             from app.services.embedding import get_embedding_service
             svc = HybridRetrievalService()
             svc.set_embedding_service(get_embedding_service())
+            svc.set_reranking_service(self._get_reranking_service())
             self._retrieval_service = svc
         return self._retrieval_service
 
@@ -169,6 +178,15 @@ class CognitiveOrchestrator:
             from app.services.generation.llm_answer_service import LLMAnswerService
             self._generation_service = LLMAnswerService()
         return self._generation_service
+
+    def _get_kg_service(self) -> Any:
+        if self._kg_service is None:
+            try:
+                from app.services.knowledge_graph.kg_service import KnowledgeGraphService
+                self._kg_service = KnowledgeGraphService()
+            except Exception as exc:
+                logger.warning("kg_service_unavailable", error=str(exc))
+        return self._kg_service
 
     # ── Point d'entrée principal ──────────────────────────────────────────────
 
@@ -209,12 +227,13 @@ class CognitiveOrchestrator:
             )
             return self._build_error_response(state, exc)
 
-        # Injecter session_id et intent dans la réponse finale
+        # Injecter session_id, intent et plan dans la réponse finale
         if state.response is not None:
             state.response = state.response.model_copy(update={
                 "session_id": state.request.session_id,
                 "intent_detected": state.intent,
                 "juridical_system_detected": state.request.juridical_system,
+                "action_plan": state.action_plan,
             })
 
         total_ms = (time.perf_counter() - state.start_time) * 1000
@@ -293,15 +312,21 @@ class CognitiveOrchestrator:
 
         Sous-étapes (Algo 1) :
           - chargerProfil(session_id) → profil P
-          - résumerSession(historique) → contexte S
+          - résumerSession(historique) → contexte S  [Sprint 3 : depuis PostgreSQL]
         """
         t0 = time.perf_counter()
 
-        # Profil (depuis la requête — Sprint 1 : pas de persistance session)
+        # Profil utilisateur
         state.profile = state.request.profile or UserProfile.CITIZEN
 
-        # Contexte de session (Sprint 1 : transmis directement si fourni)
-        if state.request.session_context:
+        # Contexte de session : d'abord depuis PostgreSQL, sinon depuis la requête
+        if state.request.session_id:
+            db_context = await self._load_session_history(state.request.session_id)
+            if db_context:
+                state.session_context = db_context
+            elif state.request.session_context:
+                state.session_context = state.request.session_context
+        elif state.request.session_context:
             state.session_context = state.request.session_context
 
         state.step_latencies["comprendre"] = (time.perf_counter() - t0) * 1000
@@ -312,6 +337,37 @@ class CognitiveOrchestrator:
             has_session_context=bool(state.session_context),
         )
         return state
+
+    async def _load_session_history(self, session_id: str) -> str:
+        """Charge les N derniers échanges d'une session depuis PostgreSQL (Sprint 3)."""
+        try:
+            from app.storage.postgres_client import get_db_session
+            from app.models.db_models import QueryLog
+            from sqlalchemy import select
+
+            async with get_db_session() as db:
+                result = await db.execute(
+                    select(QueryLog)
+                    .where(QueryLog.session_id == session_id)
+                    .order_by(QueryLog.created_at.desc())
+                    .limit(self.settings.session_history_max_turns)
+                )
+                logs = result.scalars().all()
+
+            if not logs:
+                return ""
+
+            turns: list[str] = []
+            for log in reversed(logs):
+                answer_preview = ""
+                if log.response_json:
+                    answer_preview = log.response_json.get("answer_preview", "")
+                turns.append(f"Q: {log.query}\nR: {answer_preview}")
+
+            return "\n\n".join(turns)
+        except Exception as exc:
+            logger.warning("session_history_load_failed", error=str(exc))
+            return ""
 
     # ── Nœud 3 : DÉLIBÉRER ───────────────────────────────────────────────────
 
@@ -331,10 +387,14 @@ class CognitiveOrchestrator:
         elif state.intent == IntentType.OUT_OF_SCOPE:
             state.action_plan = ["REFUSE_OUT_OF_SCOPE"]
         else:
-            # Sprint 1 : RAG hybride systématique
             state.action_plan = ["HYBRID_RAG"]
-            # Sprint 2 ajoutera : "KNOWLEDGE_GRAPH" si NORMATIVE/COMPARATIVE
-            # Sprint 3 ajoutera : "WEB_SEARCH" si OUT_OF_CORPUS + escalade autorisée
+            # KG activé pour les intentions normatives et comparatives
+            if state.intent in (IntentType.NORMATIVE, IntentType.COMPARATIVE):
+                state.action_plan.append("KNOWLEDGE_GRAPH")
+            # WEB_SEARCH activé si le paramètre est activé (Sprint 3)
+            # — déclenchement conditionnel post-retrieval dans _agir() si score < τ_esc
+            if self.settings.web_search_enabled:
+                state.action_plan.append("WEB_SEARCH_IF_LOW_CONFIDENCE")
 
         state.step_latencies["deliberer"] = (time.perf_counter() - t0) * 1000
         logger.debug(
@@ -361,6 +421,16 @@ class CognitiveOrchestrator:
 
         if "HYBRID_RAG" in state.action_plan:
             state = await self._execute_hybrid_rag(state)
+
+        if "KNOWLEDGE_GRAPH" in state.action_plan:
+            state = await self._execute_knowledge_graph(state)
+
+        # Web search : déclenché si score trop bas après retrieval (Sprint 3)
+        if (
+            "WEB_SEARCH_IF_LOW_CONFIDENCE" in state.action_plan
+            and state.retrieval_score < self.settings.escalation_threshold
+        ):
+            state = await self._execute_web_search(state)
 
         state.step_latencies["agir"] = (time.perf_counter() - t0) * 1000
         logger.debug(
@@ -402,6 +472,82 @@ class CognitiveOrchestrator:
 
         return state
 
+    async def _execute_knowledge_graph(self, state: OrchestratorState) -> OrchestratorState:
+        """Enrichit le contexte via le graphe de connaissances (Algo 3)."""
+        try:
+            kg_svc = self._get_kg_service()
+            if kg_svc is None:
+                return state
+
+            from app.services.knowledge_graph.kg_service import KnowledgeGraphService
+            ctx = await kg_svc.enrich_context(
+                entities=state.entities,
+                query=state.request.query,
+                language=state.language.value,
+            )
+            state.kg_context_str = kg_svc.kg_context_to_prompt_str(ctx, state.language.value)
+
+            logger.debug(
+                "knowledge_graph_done",
+                trace_id=state.trace_id,
+                articles=len(ctx.articles),
+                divergences=len(ctx.bijuridical_divergences),
+            )
+        except Exception as exc:
+            logger.warning("knowledge_graph_failed", error=str(exc))
+
+        return state
+
+    async def _execute_web_search(self, state: OrchestratorState) -> OrchestratorState:
+        """
+        Recherche web DuckDuckGo en fallback quand le corpus ne répond pas (Sprint 3).
+        Ajoute les snippets dans kg_context_str pour enrichir le prompt LLM.
+        """
+        try:
+            from duckduckgo_search import DDGS
+
+            # Requête adaptée au domaine juridique camerounais
+            search_query = f"droit camerounais administration {state.request.query}"
+            snippets: list[str] = []
+
+            with DDGS() as ddgs:
+                for r in ddgs.text(
+                    search_query,
+                    max_results=self.settings.web_search_max_results,
+                    region=self.settings.web_search_region,
+                ):
+                    title = r.get("title", "")
+                    body = r.get("body", "")[:400]
+                    href = r.get("href", "")
+                    snippets.append(f"- **{title}** ({href})\n  {body}")
+
+            if snippets:
+                web_block = (
+                    "[Résultats de recherche web — sources externes non vérifiées]\n"
+                    + "\n".join(snippets)
+                )
+                state.kg_context_str = (
+                    f"{state.kg_context_str}\n\n{web_block}"
+                    if state.kg_context_str else web_block
+                )
+                state.action_plan.append("WEB_SEARCH")
+                state.warnings.append(
+                    "Des résultats web ont été utilisés comme complément "
+                    "(sources non officielles — vérifier auprès des autorités compétentes)."
+                )
+                logger.info(
+                    "web_search_done",
+                    trace_id=state.trace_id,
+                    results=len(snippets),
+                    query_preview=search_query[:80],
+                )
+        except ImportError:
+            logger.warning("web_search_unavailable", reason="duckduckgo_search not installed")
+        except Exception as exc:
+            logger.warning("web_search_failed", error=str(exc))
+
+        return state
+
     def _build_retrieval_filters(self, state: OrchestratorState) -> dict[str, Any]:
         """Construit les filtres Milvus/ES selon le profil et l'intention."""
         filters: dict[str, Any] = {}
@@ -434,12 +580,19 @@ class CognitiveOrchestrator:
         # Génération LLM
         try:
             generation_service = self._get_generation_service()
+            # Fusionner contexte de session + contexte KG (s'il existe)
+            combined_context = state.session_context
+            if state.kg_context_str:
+                combined_context = (
+                    f"{state.kg_context_str}\n\n{combined_context}"
+                    if combined_context else state.kg_context_str
+                )
             state.response = await generation_service.generate_answer(
                 query=state.request.query,
                 retrieved_chunks=state.retrieved_chunks,
                 language=state.language,
                 profile=state.profile,
-                session_context=state.session_context,
+                session_context=combined_context,
                 confidence_score=state.retrieval_score,
             )
         except Exception as exc:
@@ -558,11 +711,60 @@ class CognitiveOrchestrator:
             total_ms=round(total_ms, 2),
         )
 
-        # Sprint 3 : persistance PostgreSQL de la session et mémoire épisodique
-        # await self._persist_session(state)
+        # Persistance PostgreSQL (Sprint 2)
+        try:
+            await self._persist_session(state, round(total_ms, 2))
+        except Exception as exc:
+            logger.warning("session_persist_failed", error=str(exc))
 
         state.step_latencies["adapter"] = (time.perf_counter() - t0) * 1000
         return state
+
+    async def _persist_session(self, state: OrchestratorState, latency_ms: float) -> None:
+        """Écrit un QueryLog en PostgreSQL (Algo 6, Sprint 2)."""
+        from app.storage.postgres_client import get_db_session
+        from app.models.db_models import QueryLog, Session as DBSession
+
+        session_id_str = str(state.request.session_id)
+
+        async with get_db_session() as db:
+            # Upsert session (créer si inconnue)
+            from sqlalchemy import select
+            existing = await db.execute(
+                select(DBSession).where(DBSession.id == session_id_str)
+            )
+            if existing.scalar_one_or_none() is None:
+                db.add(DBSession(
+                    id=session_id_str,
+                    language=state.language.value,
+                    profile_type=state.profile.value,
+                ))
+
+            # Créer le QueryLog
+            db.add(QueryLog(
+                session_id=session_id_str,
+                query=state.request.query,
+                language=state.language.value,
+                profile=state.profile.value,
+                intent=state.intent.value,
+                plan_json={"action_plan": state.action_plan},
+                retrieved_chunks_json=[
+                    {"chunk_id": c.chunk_id, "source": c.source, "score": c.final_score}
+                    for c in state.retrieved_chunks
+                ],
+                response_json={
+                    "answer_preview": (state.response.answer[:200] if state.response else ""),
+                    "citations_count": len(state.response.citations) if state.response else 0,
+                },
+                citations_json=[
+                    c.model_dump() for c in (state.response.citations or [])
+                ] if state.response else [],
+                score_conf=round(state.confidence_score, 4),
+                latency_ms=latency_ms,
+                model_used=self.settings.llm_model,
+                safety_flags=[f.value for f in (state.response.safety_flags or [])]
+                              if state.response else [],
+            ))
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 

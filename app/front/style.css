@@ -285,8 +285,30 @@ body {
 .badge.lang        { background: var(--primary-light); color: var(--primary); }
 .badge.model       { background: var(--gray-100); color: var(--gray-600); border: 1px solid var(--gray-200); }
 .badge.latency     { background: var(--gray-100); color: var(--gray-600); border: 1px solid var(--gray-200); }
+.badge.intent      { background: #ede9fe; color: #6d28d9; }
+.badge.badge-kg    { background: #ecfdf5; color: #059669; }   /* graphe connaissances */
+.badge.badge-web   { background: #e0f2fe; color: #0369a1; }   /* web search */
+
+/* ── Chunk scores row (Sprint 2) ──────────────────────────────── */
+.chunk-scores {
+  display: flex; gap: 10px; flex-wrap: wrap;
+  margin-top: 4px; font-size: .68rem; color: var(--gray-400);
+}
+.chunk-scores span { display: inline-flex; align-items: center; gap: 2px; }
+.chunk-scores .rerank-score { color: #7c3aed; font-weight: 600; }
 
 .msg-latency { color: var(--gray-400); font-size: .7rem; }
+
+/* ── Sprint 3 additions ────────────────────────────────────────── */
+/* Web search warning */
+.warnings-block p.warning-web {
+  color: #0369a1;
+  background: #e0f2fe;
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+}
+/* Citation relevance score */
+.citation-score { color: var(--success); font-size: .72rem; font-weight: 600; }
 
 /* Citations */
 .citations-block {

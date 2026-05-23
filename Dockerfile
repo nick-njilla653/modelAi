@@ -1,11 +1,11 @@
-# ── GOV-AI 2.0 — Image Docker (Sprint 1) ─────────────────────────────────────
-# Python 3.11-slim + Tesseract 5 + dépendances OCR/ML
+# ── GOV-AI 2.0 — Image Docker (Sprint 3) ─────────────────────────────────────
+# Python 3.11-slim + Tesseract 5 + dépendances OCR/ML + reranker HuggingFace
 # Déploiement CENADI 100% on-premise
 
 FROM python:3.11-slim
 
 LABEL maintainer="NJILLA TCHAGADICK NICOL EMMANUEL <njilla653@enspy.cm>"
-LABEL version="2.0.0-sprint1"
+LABEL version="2.0.0-sprint3"
 LABEL description="GOV-AI 2.0 — Assistant gouvernemental intelligent (Cameroun)"
 
 WORKDIR /app
@@ -28,7 +28,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # ── Dépendances Python ─────────────────────────────────────────────────────────
 COPY requirements.txt .
+# Pré-installer torch CPU-only pour éviter que sentence-transformers
+# tire nvidia-nccl (~200 MB) lors du build (CENADI = pas de GPU)
 RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir \
+        torch --index-url https://download.pytorch.org/whl/cpu && \
     pip install --no-cache-dir -r requirements.txt
 
 # ── Code applicatif ────────────────────────────────────────────────────────────
@@ -39,6 +43,7 @@ RUN mkdir -p \
     /app/storage/documents \
     /app/storage/ocr_cache \
     /app/storage/model_cache \
+    /app/storage/reranker_cache \
     /app/logs \
     /app/eval/datasets \
     /app/eval/reports \

@@ -14,11 +14,12 @@ const API = {
 
 // ── App state ─────────────────────────────────────────────────────────────────
 const state = {
-  sessionId:          null,
-  streaming:          false,
-  abortCtrl:          null,
-  conversationHistory: [],   // [{q: string, a: string}]  — max 10 turns stored
-  sessionTurnCount:   0,
+  sessionId:           null,
+  streaming:           false,
+  abortCtrl:           null,
+  conversationHistory: [],   // [{q, a}] — max 10 turns (fallback si pas de DB)
+  sessionTurnCount:    0,
+  serverHistoryLoaded: false, // true dès que le serveur renvoie session_id (Sprint 3)
 };
 
 // ── DOM shortcuts ─────────────────────────────────────────────────────────────
@@ -76,6 +77,7 @@ const query = {
       state.sessionId = null;
       state.conversationHistory = [];
       state.sessionTurnCount = 0;
+      state.serverHistoryLoaded = false;
       $('sessionBadge').style.display = 'none';
       toast('Nouvelle session démarrée', 'info');
     });
@@ -131,10 +133,11 @@ const query = {
       // Persist session id
       if (res.session_id) {
         state.sessionId = res.session_id;
+        state.serverHistoryLoaded = true;
         showSessionBadge(res.session_id);
       }
 
-      // Record exchange in history
+      // Record exchange in local history (fallback for streaming)
       recordExchange(text, res.answer);
 
       renderAIResponse(aiEl, res);
@@ -234,11 +237,14 @@ const query = {
         bubble.innerHTML = renderMarkdown(fullText);
       }
 
-      // Add minimal meta after streaming (no full QueryResponse available)
-      const meta = document.createElement('div');
-      meta.className = 'msg-meta';
-      meta.innerHTML = `<span class="badge model"><i class="fas fa-robot"></i> streaming</span>`;
-      aiEl.appendChild(meta);
+      // Metadata post-streaming
+      const sMeta = document.createElement('div');
+      sMeta.className = 'msg-meta';
+      sMeta.innerHTML = `
+        <span class="badge model"><i class="fas fa-robot"></i> streaming</span>
+        <span class="badge lang">${$('qLang').value.toUpperCase()}</span>
+        <span class="badge latency"><i class="fas fa-bolt"></i> temps réel</span>`;
+      aiEl.appendChild(sMeta);
 
     } catch (err) {
       if (err.name !== 'AbortError') {
@@ -318,41 +324,66 @@ function renderAIResponse(aiEl, res) {
   bubble.classList.add('markdown');
   bubble.innerHTML = renderMarkdown(res.answer);
 
-  // Meta badges
+  // ── Meta badges ────────────────────────────────────────────────────────────
   const meta = document.createElement('div');
   meta.className = 'msg-meta';
 
+  // Confidence
   const confidence = res.confidence_level || confidenceFromScore(res.uncertainty_score);
   meta.innerHTML += `<span class="badge ${confidence}">${confidenceLabel(confidence)}</span>`;
 
+  // Score %
   if (res.uncertainty_score !== undefined) {
     const pct = (res.uncertainty_score * 100).toFixed(0);
     meta.innerHTML += `<span class="badge latency">score ${pct}%</span>`;
   }
+
+  // Language
   if (res.language_detected) {
     meta.innerHTML += `<span class="badge lang">${res.language_detected.toUpperCase()}</span>`;
   }
-  if (res.model_used) {
-    meta.innerHTML += `<span class="badge model"><i class="fas fa-microchip"></i> ${res.model_used}</span>`;
+
+  // Intent
+  if (res.intent_detected && res.intent_detected !== 'unknown') {
+    meta.innerHTML += `<span class="badge intent"><i class="fas fa-bullseye"></i> ${escHtml(res.intent_detected)}</span>`;
   }
+
+  // Action plan badges (Sprint 3)
+  const plan = res.action_plan || [];
+  if (plan.includes('KNOWLEDGE_GRAPH')) {
+    meta.innerHTML += `<span class="badge badge-kg"><i class="fas fa-circle-nodes"></i> KG</span>`;
+  }
+  if (plan.includes('WEB_SEARCH')) {
+    meta.innerHTML += `<span class="badge badge-web"><i class="fas fa-globe"></i> Web</span>`;
+  }
+
+  // Model
+  if (res.model_used) {
+    meta.innerHTML += `<span class="badge model"><i class="fas fa-microchip"></i> ${escHtml(res.model_used)}</span>`;
+  }
+
+  // Latency
   if (res.latency_ms) {
     meta.innerHTML += `<span class="badge latency"><i class="fas fa-clock"></i> ${res.latency_ms.toFixed(0)} ms</span>`;
   }
 
   // Safety flags
   (res.safety_flags || []).forEach(flag => {
-    meta.innerHTML += `<span class="badge flag"><i class="fas fa-triangle-exclamation"></i> ${flag}</span>`;
+    meta.innerHTML += `<span class="badge flag"><i class="fas fa-triangle-exclamation"></i> ${escHtml(flag)}</span>`;
   });
 
   aiEl.appendChild(meta);
 
-  // Warnings
+  // ── Warnings ────────────────────────────────────────────────────────────────
   if (res.warnings && res.warnings.length) {
     const w = document.createElement('div');
     w.className = 'warnings-block';
-    w.innerHTML = res.warnings.map(
-      ww => `<p><i class="fas fa-circle-exclamation"></i> ${escHtml(ww)}</p>`
-    ).join('');
+    w.innerHTML = res.warnings.map(ww => {
+      const isWeb = ww.toLowerCase().includes('web');
+      const icon = isWeb ? 'fa-globe' : 'fa-circle-exclamation';
+      const cls  = isWeb ? 'warning-web' : '';
+      return `<p class="${cls}"><i class="fas ${icon}"></i> ${escHtml(ww)}</p>`;
+    }).join('');
     aiEl.appendChild(w);
   }
 
@@ -362,15 +393,19 @@ function renderAIResponse(aiEl, res) {
     cBlock.className = 'citations-block';
     cBlock.innerHTML = `<h4><i class="fas fa-quote-left"></i> Citations (${res.citations.length})</h4>`;
     res.citations.forEach(c => {
+      const relScore = c.relevance_score ?? c.score;
       cBlock.innerHTML += `
         <div class="citation-item">
           <i class="fas fa-file-lines"></i>
           <div>
-            <div><span class="citation-source">${escHtml(c.source || '—')}</span>
+            <div>
+              <span class="citation-source">${escHtml(c.doc_title || c.source || '—')}</span>
+              ${c.article ? `<span class="citation-page"> · Art. ${escHtml(c.article)}</span>` : ''}
               ${c.page ? `<span class="citation-page"> · p. ${c.page}</span>` : ''}
-              ${c.score !== undefined ? `<span class="citation-page"> · score ${(c.score*100).toFixed(0)}%</span>` : ''}
+              ${c.jurisdiction ? `<span class="citation-page"> · ${escHtml(c.jurisdiction)}</span>` : ''}
+              ${relScore !== undefined ? `<span class="citation-score"> · ${(relScore*100).toFixed(0)}%</span>` : ''}
             </div>
-            ${c.excerpt ? `<div class="citation-excerpt">"${escHtml(truncate(c.excerpt, 160))}"</div>` : ''}
+            ${c.excerpt ? `<div class="citation-excerpt">"${escHtml(truncate(c.excerpt, 200))}"</div>` : ''}
           </div>
         </div>`;
     });
@@ -399,11 +434,11 @@ function renderAIResponse(aiEl, res) {
           </div>
           <div class="chunk-content">${escHtml(truncate(ch.content || '', 240))}</div>
           ${ch.dense_score !== undefined ? `
-            <div class="chunk-score" style="margin-top:4px;font-size:.7rem">
-              dense ${(ch.dense_score*100).toFixed(0)}% &nbsp;|&nbsp;
-              bm25 ${((ch.sparse_score||0)*100).toFixed(0)}% &nbsp;|&nbsp;
-              rrf ${(ch.rrf_score||0).toFixed(4)}
-              ${ch.rerank_score !== undefined ? `&nbsp;|&nbsp; rerank ${(ch.rerank_score*100).toFixed(0)}%` : ''}
+            <div class="chunk-scores">
+              <span title="Similarité cosinus">🧠 ${(ch.dense_score*100).toFixed(0)}%</span>
+              <span title="BM25">📝 ${((ch.sparse_score||0)*100).toFixed(0)}%</span>
+              <span title="RRF fusion">🔀 ${(ch.rrf_score||0).toFixed(4)}</span>
+              ${ch.rerank_score !== undefined ? `<span title="Cross-encoder reranker" class="rerank-score">⚡ ${(ch.rerank_score*100).toFixed(0)}%</span>` : ''}
             </div>` : ''}
         </div>`;
     });
@@ -443,7 +478,11 @@ function scrollChat() {
 
 function showSessionBadge(id) {
   state.sessionId = id;
-  $('sessionIdDisplay').textContent = `Session : ${id.slice(0, 8)}…`;
+  const shortId = id.slice(0, 8);
+  const dbIcon = state.serverHistoryLoaded
+    ? `<i class="fas fa-database" title="Historique persisté en base de données" style="color:var(--success);font-size:.65rem"></i>`
+    : '';
+  $('sessionIdDisplay').innerHTML = `${dbIcon} Session : ${shortId}…`;
   $('sessionBadge').style.display = 'flex';
   updateTurnCounter();
 }
@@ -751,6 +790,8 @@ const HEALTH_ICONS = {
   elasticsearch: 'fas fa-magnifying-glass',
   postgres:      'fas fa-server',
   embedding:     'fas fa-brain',
+  neo4j:         'fas fa-circle-nodes',
+  reranker:      'fas fa-sort-amount-down',
   api:           'fas fa-plug',
 };
 

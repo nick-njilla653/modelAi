@@ -1,4 +1,4 @@
-# GOV-AI 2.0 — Docker Compose Sprint 2
+# GOV-AI 2.0 — Docker Compose Sprint 4
 # Stack complète : API + Milvus + Elasticsearch + PostgreSQL + Neo4j + Ollama
 # Déploiement on-premise CENADI (souveraineté numérique)
 
@@ -8,6 +8,7 @@ services:
 
   # ── GOV-AI 2.0 API ──────────────────────────────────────────────────────────
   govai-api:
+    image: govai2-api:2.0.0-sprint3
     build:
       context: .
       dockerfile: Dockerfile
@@ -84,6 +85,13 @@ services:
       timeout: 10s
       start_period: 45s
       retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1G
+        reservations:
+          memory: 512M
     restart: unless-stopped
     networks:
       - govai
@@ -105,6 +113,13 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          memory: 256M
     restart: unless-stopped
     networks:
       - govai
@@ -130,6 +145,11 @@ services:
       interval: 30s
       timeout: 20s
       retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
     networks:
       - govai
 
@@ -150,6 +170,11 @@ services:
       interval: 30s
       timeout: 20s
       retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
     networks:
       - govai
 
@@ -177,6 +202,13 @@ services:
       interval: 30s
       timeout: 20s
       retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+        reservations:
+          memory: 1G
     restart: unless-stopped
     networks:
       - govai
@@ -201,6 +233,13 @@ services:
       timeout: 20s
       start_period: 60s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+        reservations:
+          memory: 1G
     restart: unless-stopped
     networks:
       - govai
@@ -220,6 +259,13 @@ services:
       timeout: 15s
       start_period: 60s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "4.0"
+          memory: 6G
+        reservations:
+          memory: 3G
     restart: unless-stopped
     networks:
       - govai
@@ -255,6 +301,13 @@ services:
       timeout: 10s
       start_period: 60s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          memory: 512M
     restart: unless-stopped
     networks:
       - govai

@@ -212,3 +212,75 @@ class AuditEvent(Base):
         Index("ix_audit_events_is_flagged", "is_flagged"),
         Index("ix_audit_events_created_at", "created_at"),
     )
+
+
+# ── Fine-Tuning Jobs ──────────────────────────────────────────────────────────
+
+class FinetuneJob(Base):
+    """
+    Table finetune_jobs — suivi des jobs d'entraînement fine-tuning.
+    Un job = une session d'adaptation d'un modèle sur des documents.
+    """
+    __tablename__ = "finetune_jobs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(256), nullable=False)
+    target: Mapped[str] = mapped_column(String(32), nullable=False)   # "embedding" | "llm" | "reranker"
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    # pending | dataset_building | training | evaluating | completed | failed
+    base_model: Mapped[str] = mapped_column(String(256), nullable=False)
+    output_model_path: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
+    ollama_model_name: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    documents_count: Mapped[int] = mapped_column(Integer, default=0)
+    dataset_size: Mapped[int] = mapped_column(Integer, default=0)
+    epochs: Mapped[int] = mapped_column(Integer, default=3)
+    batch_size: Mapped[int] = mapped_column(Integer, default=16)
+    learning_rate: Mapped[float] = mapped_column(Float, default=2e-5)
+    progress: Mapped[float] = mapped_column(Float, default=0.0)
+    loss_history: Mapped[Optional[list[Any]]] = mapped_column(JSON, nullable=True)
+    logs: Mapped[Optional[list[str]]] = mapped_column(JSON, nullable=True)
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    evaluations: Mapped[list["EvaluationComparison"]] = relationship(
+        "EvaluationComparison", back_populates="job", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        Index("ix_finetune_jobs_status", "status"),
+        Index("ix_finetune_jobs_target", "target"),
+        Index("ix_finetune_jobs_is_active", "is_active"),
+    )
+
+
+# ── Evaluation Comparisons ────────────────────────────────────────────────────
+
+class EvaluationComparison(Base):
+    """
+    Table evaluation_comparisons — résultats de comparaison entre modèles.
+    Compare original vs fine-tuné vs modèles de référence mondiaux.
+    """
+    __tablename__ = "evaluation_comparisons"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    job_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("finetune_jobs.id", ondelete="CASCADE"), nullable=False
+    )
+    original_metrics: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    finetuned_metrics: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    reference_metrics: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    test_queries: Mapped[Optional[list[Any]]] = mapped_column(JSON, nullable=True)
+    sample_responses: Mapped[Optional[list[Any]]] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    job: Mapped["FinetuneJob"] = relationship("FinetuneJob", back_populates="evaluations")
+
+    __table_args__ = (Index("ix_eval_comparisons_job_id", "job_id"),)

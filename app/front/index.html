@@ -6,6 +6,7 @@
   <title>GOV-AI 2.0 — Test Interface</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
   <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
 <div class="app-container">
@@ -33,6 +34,9 @@
         </li>
         <li class="nav-item" data-tab="health">
           <i class="fas fa-heartbeat"></i><span>Santé</span>
+        </li>
+        <li class="nav-item" data-tab="finetune">
+          <i class="fas fa-brain"></i><span>Fine-Tuning</span>
         </li>
       </ul>
     </nav>
@@ -252,6 +256,203 @@
       <div class="health-raw card">
         <h3><i class="fas fa-code"></i> Réponse brute</h3>
         <pre id="healthRaw">—</pre>
+      </div>
+    </section>
+
+    <!-- ══ TAB : FINE-TUNING ═══════════════════════════════════════════ -->
+    <section id="tab-finetune" class="tab">
+      <div class="tab-header">
+        <h2><i class="fas fa-brain"></i> Fine-Tuning du modèle</h2>
+        <button class="btn-ghost" id="btnRefreshJobs">
+          <i class="fas fa-rotate-right"></i> Actualiser
+        </button>
+      </div>
+
+      <div class="ft-layout">
+
+        <!-- ── Colonne gauche : upload + config ─────────────────────── -->
+        <div class="ft-left">
+
+          <!-- Upload dossier -->
+          <div class="card ft-card">
+            <h3><i class="fas fa-folder-open"></i> 1. Upload du dossier</h3>
+            <div class="drop-zone" id="ftDropZone">
+              <i class="fas fa-file-zipper drop-icon"></i>
+              <p>Glissez une archive <strong>ZIP</strong> du dossier<br>ou cliquez pour sélectionner</p>
+              <p class="hint">Formats : PDF, TXT, MD — max 500 Mo</p>
+              <input type="file" id="ftFileInput" accept=".zip" hidden>
+            </div>
+            <div id="ftFilePreview" class="file-preview" style="display:none">
+              <i class="fas fa-file-zipper"></i>
+              <span id="ftFileName"></span>
+              <button class="btn-icon" id="ftClearFile"><i class="fas fa-times"></i></button>
+            </div>
+            <div id="ftUploadResult" class="ft-upload-info" style="display:none"></div>
+            <button class="btn-primary" id="btnFtUpload" disabled>
+              <i class="fas fa-cloud-upload-alt"></i> Analyser le dossier
+            </button>
+          </div>
+
+          <!-- Configuration entraînement -->
+          <div class="card ft-card">
+            <h3><i class="fas fa-sliders"></i> 2. Configuration</h3>
+            <div class="form-grid">
+              <div class="form-group">
+                <label>Nom du job</label>
+                <input type="text" id="ftJobName" placeholder="Ex : GOV-AI Sprint 4 v1" value="Fine-Tuning Sprint 4">
+              </div>
+              <div class="form-group">
+                <label>Cible d'entraînement</label>
+                <select id="ftTarget">
+                  <option value="llm">LLM (llama3.2 via Ollama Modelfile)</option>
+                  <option value="embedding">Embedding (mxbai-embed-large)</option>
+                  <option value="reranker">Reranker (bge-reranker-v2-m3)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Mode entraînement LLM</label>
+                <select id="ftMode">
+                  <option value="modelfile">Modelfile (CPU, rapide)</option>
+                  <option value="lora">LoRA (GPU requis, poids réels)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Époques</label>
+                <input type="number" id="ftEpochs" value="3" min="1" max="20">
+              </div>
+              <div class="form-group">
+                <label>Batch size</label>
+                <input type="number" id="ftBatch" value="16" min="4" max="64">
+              </div>
+              <div class="form-group">
+                <label>Learning rate</label>
+                <input type="number" id="ftLr" value="0.00002" step="0.000001" min="0.000001" max="0.01">
+              </div>
+              <div class="form-group">
+                <label>Paires QA par chunk</label>
+                <input type="number" id="ftPairsPerChunk" value="3" min="1" max="10">
+              </div>
+            </div>
+            <!-- Option ingestion corpus -->
+            <div class="form-group form-check ft-corpus-option">
+              <label class="toggle-label">
+                <input type="checkbox" id="ftIngestCorpus" checked>
+                <span>Enrichir aussi le corpus (KG + Milvus + ES)</span>
+              </label>
+              <small>Recommandé : indexe les documents dans le graphe de connaissances et la base vectorielle</small>
+            </div>
+
+            <!-- Alerte data leakage -->
+            <div class="ft-warning" id="ftDataLeakageWarning">
+              <i class="fas fa-exclamation-triangle"></i>
+              <div>
+                <strong>Attention — risque de data leakage</strong><br>
+                Si les documents uploadés couvrent les mêmes sujets que le dataset d'évaluation
+                (<code>eval/datasets/qa_bilingual_annotated.json</code>),
+                les métriques B1-B4 seront gonflées artificiellement.
+                Utilisez des documents <em>différents</em> pour l'entraînement et l'évaluation.
+              </div>
+            </div>
+
+            <button class="btn-primary" id="btnFtStart" disabled>
+              <i class="fas fa-play-circle"></i> Lancer le fine-tuning
+            </button>
+          </div>
+
+          <!-- Modèles actifs -->
+          <div class="card ft-card">
+            <h3><i class="fas fa-microchip"></i> Modèles actifs</h3>
+            <div id="ftActiveModels" class="ft-active-models">
+              <p class="empty-hint">Chargement…</p>
+            </div>
+            <div class="ft-model-actions" style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn-ghost" id="btnRollbackEmbedding">
+                <i class="fas fa-rotate-left"></i> Rollback Embedding
+              </button>
+              <button class="btn-ghost" id="btnRollbackLlm">
+                <i class="fas fa-rotate-left"></i> Rollback LLM
+              </button>
+              <button class="btn-ghost" id="btnRollbackReranker">
+                <i class="fas fa-rotate-left"></i> Rollback Reranker
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── Colonne droite : jobs + progression + évaluation ─────── -->
+        <div class="ft-right">
+
+          <!-- Progression temps réel -->
+          <div class="card ft-card" id="ftProgressCard" style="display:none">
+            <h3><i class="fas fa-spinner fa-spin"></i> Progression en cours</h3>
+            <div class="ft-progress-bar-wrap">
+              <div class="ft-progress-bar" id="ftProgressBar" style="width:0%"></div>
+            </div>
+            <div id="ftProgressPct" class="ft-progress-pct">0%</div>
+            <div id="ftProgressLog" class="ft-progress-log"></div>
+
+            <!-- Rapport data leakage (affiché dès que le check est terminé) -->
+            <div id="ftLeakageReport" class="ft-leakage-report" style="display:none">
+              <div class="ft-leakage-header">
+                <span id="ftLeakageBadge" class="ft-leakage-badge"></span>
+                <span id="ftLeakageSummaryText"></span>
+              </div>
+              <div id="ftLeakageDetails" class="ft-leakage-details"></div>
+            </div>
+
+            <div id="ftProgressActions" style="display:none;margin-top:12px;gap:8px;display:flex;flex-wrap:wrap">
+              <button class="btn-primary" id="btnFtApply">
+                <i class="fas fa-check-circle"></i> Intégrer le modèle
+              </button>
+              <button class="btn-secondary" id="btnFtEvaluate">
+                <i class="fas fa-flask"></i> Lancer l'évaluation
+              </button>
+            </div>
+          </div>
+
+          <!-- Liste des jobs -->
+          <div class="card ft-card">
+            <h3><i class="fas fa-list-check"></i> Historique des jobs</h3>
+            <div id="ftJobList" class="ft-job-list">
+              <p class="empty-hint">Aucun job pour l'instant.</p>
+            </div>
+          </div>
+
+          <!-- Résultats évaluation -->
+          <div class="card ft-card" id="ftEvalCard" style="display:none">
+            <h3><i class="fas fa-chart-bar"></i> Évaluation comparative</h3>
+
+            <!-- Sélecteur de job à évaluer -->
+            <div class="form-group" style="margin-bottom:12px">
+              <label>Job à évaluer</label>
+              <select id="ftEvalJobSelect"></select>
+              <button class="btn-primary" id="btnFtEvalStart" style="margin-top:8px">
+                <i class="fas fa-play"></i> Lancer l'évaluation
+              </button>
+            </div>
+
+            <div id="ftEvalSpinner" style="display:none" class="spinner"></div>
+
+            <!-- Résumé métriques -->
+            <div id="ftMetricsSummary" class="ft-metrics-grid" style="display:none"></div>
+
+            <!-- Graphes -->
+            <div class="ft-charts" id="ftChartsContainer" style="display:none">
+              <div class="ft-chart-wrap">
+                <canvas id="chartBarMetrics" height="220"></canvas>
+              </div>
+              <div class="ft-chart-wrap">
+                <canvas id="chartRadarComparison" height="260"></canvas>
+              </div>
+              <div class="ft-chart-wrap" id="chartLossWrap" style="display:none">
+                <canvas id="chartLossCurve" height="200"></canvas>
+              </div>
+            </div>
+
+            <!-- Exemples de réponses -->
+            <div id="ftSampleResponses" class="ft-samples" style="display:none"></div>
+          </div>
+        </div>
       </div>
     </section>
 

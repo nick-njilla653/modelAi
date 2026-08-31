@@ -31,6 +31,8 @@ class RerankerTrainer:
         learning_rate: float = 2e-5,
         negatives_per_positive: int = 3,
         progress_cb: Optional[Callable] = None,
+        cancel_event=None,
+        pause_event=None,
     ) -> dict:
         """Lance le fine-tuning du reranker dans un thread séparé."""
         import asyncio
@@ -48,6 +50,8 @@ class RerankerTrainer:
                 learning_rate,
                 negatives_per_positive,
                 progress_cb,
+                cancel_event,
+                pause_event,
             )
         return result
 
@@ -60,9 +64,11 @@ class RerankerTrainer:
         learning_rate,
         negatives_per_positive,
         progress_cb,
+        cancel_event=None,
+        pause_event=None,
     ) -> dict:
-        from sentence_transformers import CrossEncoder
-        from sentence_transformers.cross_encoder.evaluation import CERerankingEvaluator
+        import time
+        from sentence_transformers import CrossEncoder, InputExample
         from torch.utils.data import DataLoader
 
         qa_path = Path(qa_pairs_path)
@@ -112,8 +118,6 @@ class RerankerTrainer:
             max_length=512,
         )
 
-        # Formater pour sentence-transformers CrossEncoder
-        from sentence_transformers import InputExample
         train_examples = [
             InputExample(texts=[q, p], label=float(label))
             for q, p, label in train_samples
@@ -122,22 +126,49 @@ class RerankerTrainer:
         train_dataloader = DataLoader(train_examples, shuffle=True, batch_size=batch_size)
         warmup_steps = int(len(train_dataloader) * epochs * 0.1)
 
-        model.fit(
-            train_dataloader=train_dataloader,
-            epochs=epochs,
-            warmup_steps=warmup_steps,
-            optimizer_params={"lr": learning_rate},
-            output_path=str(out),
-            show_progress_bar=False,
-        )
+        # Entraînement époque par époque pour permettre cancel/pause entre chaque époque
+        completed_epochs = 0
+        for epoch in range(epochs):
+            if cancel_event and cancel_event.is_set():
+                raise RuntimeError("__ft_cancelled__")
+            if pause_event:
+                while not pause_event.is_set():
+                    if cancel_event and cancel_event.is_set():
+                        raise RuntimeError("__ft_cancelled__")
+                    time.sleep(0.4)
 
-        logger.info("reranker_training_done", output=str(out))
+            epoch_warmup = warmup_steps if epoch == 0 else 0
+            model.fit(
+                train_dataloader=train_dataloader,
+                epochs=1,
+                warmup_steps=epoch_warmup,
+                optimizer_params={"lr": learning_rate},
+                output_path=str(out),
+                show_progress_bar=False,
+            )
+            completed_epochs += 1
+
+            if progress_cb:
+                import asyncio
+                pct = 65 + int(((epoch + 1) / epochs) * 25)
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        loop.call_soon_threadsafe(
+                            lambda p=pct, e=epoch: asyncio.ensure_future(
+                                progress_cb(p, f"Reranker epoch {e+1}/{epochs} terminée")
+                            )
+                        )
+                except Exception:
+                    pass
+
+        logger.info("reranker_training_done", output=str(out), completed_epochs=completed_epochs)
         return {
             "output_path": str(out),
             "train_samples": len(train_samples),
             "positives": sum(1 for s in train_samples if s[2] == 1),
             "negatives": sum(1 for s in train_samples if s[2] == 0),
-            "epochs": epochs,
+            "epochs": completed_epochs,
         }
 
     def _load_qa_pairs(self, path: Path) -> list[dict]:

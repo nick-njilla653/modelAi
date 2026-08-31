@@ -9,6 +9,7 @@ import asyncio
 import json
 import shutil
 import tempfile
+import threading
 import time
 import uuid
 import zipfile
@@ -30,9 +31,20 @@ router = APIRouter(prefix="/finetune", tags=["fine-tuning"])
 # ── In-process job registry (progress + WebSocket broadcast) ─────────────────
 _JOBS: dict[str, dict[str, Any]] = {}        # job_id → {status, progress, logs, result}
 _WS_CLIENTS: dict[str, list[WebSocket]] = {}  # job_id → [WebSocket]
+_CANCEL_FLAGS: dict[str, threading.Event] = {}  # set() → annulation demandée
+_PAUSE_FLAGS:  dict[str, threading.Event] = {}  # set() → en cours, clear() → en pause
 
 _FT_DATA_DIR = Path("models/finetune_data")
 _FT_DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+
+async def _broadcast(job_id: str):
+    """Diffuse l'état courant du job à tous les WebSocket connectés."""
+    for ws in list(_WS_CLIENTS.get(job_id, [])):
+        try:
+            await ws.send_json(_JOBS[job_id])
+        except Exception:
+            pass
 
 
 # ── Schemas Pydantic ──────────────────────────────────────────────────────────
@@ -229,6 +241,64 @@ async def rollback(model_type: str) -> dict:
     return {"rolled_back": model_type, "previous": previous}
 
 
+@router.post("/jobs/{job_id}/cancel", summary="Annule un job en cours")
+async def cancel_job(job_id: str) -> dict:
+    """Envoie le signal d'annulation. Le job s'arrête à la prochaine étape sûre."""
+    job = _JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job introuvable")
+    if job["status"] in ("completed", "failed", "cancelled"):
+        raise HTTPException(status_code=400, detail=f"Job déjà terminé ({job['status']})")
+
+    # Débloquer une éventuelle pause d'abord, puis signaler l'annulation
+    if job_id in _PAUSE_FLAGS:
+        _PAUSE_FLAGS[job_id].set()
+    if job_id in _CANCEL_FLAGS:
+        _CANCEL_FLAGS[job_id].set()
+
+    _JOBS[job_id]["status"] = "cancelling"
+    _JOBS[job_id]["logs"].append("Annulation demandée — arrêt à la prochaine étape…")
+    await _broadcast(job_id)
+    return {"cancelled": job_id, "message": "Signal d'annulation envoyé"}
+
+
+@router.post("/jobs/{job_id}/pause", summary="Met un job en pause")
+async def pause_job(job_id: str) -> dict:
+    """Suspend l'entraînement. Le job reprend depuis ce point avec /resume."""
+    job = _JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job introuvable")
+    active = {"running", "dataset_building", "leakage_check", "ingesting_corpus", "training"}
+    if job["status"] not in active:
+        raise HTTPException(status_code=400, detail=f"Impossible de mettre en pause un job '{job['status']}'")
+
+    if job_id in _PAUSE_FLAGS:
+        _PAUSE_FLAGS[job_id].clear()  # clear = en pause
+
+    _JOBS[job_id]["status"] = "paused"
+    _JOBS[job_id]["logs"].append("Job mis en pause — cliquez sur Reprendre pour continuer.")
+    await _broadcast(job_id)
+    return {"paused": job_id}
+
+
+@router.post("/jobs/{job_id}/resume", summary="Reprend un job en pause")
+async def resume_job(job_id: str) -> dict:
+    """Reprend l'entraînement depuis le point de pause."""
+    job = _JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job introuvable")
+    if job["status"] != "paused":
+        raise HTTPException(status_code=400, detail="Le job n'est pas en pause")
+
+    if job_id in _PAUSE_FLAGS:
+        _PAUSE_FLAGS[job_id].set()  # set = reprendre
+
+    _JOBS[job_id]["status"] = "running"
+    _JOBS[job_id]["logs"].append("Job repris.")
+    await _broadcast(job_id)
+    return {"resumed": job_id}
+
+
 @router.get("/active-models", summary="Modèles actuellement actifs")
 async def active_models() -> dict:
     from app.services.finetuning.model_manager import ModelManager
@@ -295,21 +365,42 @@ async def progress_websocket(ws: WebSocket, job_id: str):
             _WS_CLIENTS[job_id] = [c for c in _WS_CLIENTS[job_id] if c != ws]
 
 
+# ── Helpers partagés ──────────────────────────────────────────────────────────
+
+async def _broadcast(job_id: str):
+    """Diffuse l'état courant du job à tous les WebSocket connectés."""
+    for ws in list(_WS_CLIENTS.get(job_id, [])):
+        try:
+            await ws.send_json(_JOBS[job_id])
+        except Exception:
+            pass
+
+
 # ── Background tasks ──────────────────────────────────────────────────────────
 
 async def _run_job(job_id: str, dataset_dir: Path, request: StartJobRequest):
     """Exécute le pipeline complet : dataset → training → (auto-save DB)."""
+
+    # ── Initialisation des signaux cancel / pause ──────────────────────────
+    cancel_ev = _CANCEL_FLAGS[job_id] = threading.Event()
+    pause_ev  = _PAUSE_FLAGS[job_id]  = threading.Event()
+    pause_ev.set()  # état initial : en cours
 
     async def _update(progress: int, log: str, status: str = "running"):
         _JOBS[job_id]["progress"] = progress
         _JOBS[job_id]["status"] = status
         _JOBS[job_id]["logs"].append(log)
         logger.debug("finetune_progress", job=job_id, pct=progress, msg=log)
-        for ws in list(_WS_CLIENTS.get(job_id, [])):
-            try:
-                await ws.send_json(_JOBS[job_id])
-            except Exception:
-                pass
+        await _broadcast(job_id)
+
+    async def _check(step: str = ""):
+        """Lève CancelledError si annulation demandée, bloque si en pause."""
+        if cancel_ev.is_set():
+            raise asyncio.CancelledError(step)
+        while not pause_ev.is_set():
+            if cancel_ev.is_set():
+                raise asyncio.CancelledError(step)
+            await asyncio.sleep(0.4)
 
     try:
         _JOBS[job_id]["status"] = "dataset_building"
@@ -333,8 +424,11 @@ async def _run_job(job_id: str, dataset_dir: Path, request: StartJobRequest):
             output_dir=job_output_dir / "dataset",
             pairs_per_chunk=request.pairs_per_chunk,
             progress_cb=_update,
+            cancel_event=cancel_ev,
+            pause_event=pause_ev,
         )
         _JOBS[job_id]["dataset_info"] = dataset_info
+        await _check("après dataset building")
 
         # ── Étape 1b : Vérification du data leakage ──────────────────────────
         _JOBS[job_id]["status"] = "leakage_check"
@@ -387,6 +481,8 @@ async def _run_job(job_id: str, dataset_dir: Path, request: StartJobRequest):
             logger.warning("leakage_check_failed", job=job_id, error=str(exc))
             await _update(58, f"[Attention] Vérification leakage ignorée : {exc}")
 
+        await _check("après leakage check")
+
         # ── Étape 1c (optionnelle) : Ingestion corpus (KG + Milvus + ES) ────────
         if request.ingest_corpus:
             _JOBS[job_id]["status"] = "ingesting_corpus"
@@ -410,9 +506,12 @@ async def _run_job(job_id: str, dataset_dir: Path, request: StartJobRequest):
                 _JOBS[job_id]["corpus_ingestion"] = {"error": str(exc)}
                 await _update(63, f"[Attention] Ingestion corpus partielle : {exc}")
 
+        await _check("après ingestion corpus")
+
         # ── Étape 2 : Entraînement ─────────────────────────────────────────
         _JOBS[job_id]["status"] = "training"
         await _update(64, f"Dataset prêt ({dataset_info['total_pairs']} paires). Lancement de l'entraînement…")
+        await _check("avant entraînement")
 
         result: dict = {}
 
@@ -427,6 +526,8 @@ async def _run_job(job_id: str, dataset_dir: Path, request: StartJobRequest):
                 batch_size=request.batch_size,
                 learning_rate=request.learning_rate,
                 progress_cb=_update,
+                cancel_event=cancel_ev,
+                pause_event=pause_ev,
             )
             result = {**train_result, "embedding_output": str(embed_out)}
 
@@ -444,6 +545,8 @@ async def _run_job(job_id: str, dataset_dir: Path, request: StartJobRequest):
                 batch_size=min(request.batch_size, 8),
                 learning_rate=request.learning_rate,
                 progress_cb=_update,
+                cancel_event=cancel_ev,
+                pause_event=pause_ev,
             )
             result = {**train_result, "reranker_output": str(reranker_out)}
 
@@ -463,6 +566,7 @@ async def _run_job(job_id: str, dataset_dir: Path, request: StartJobRequest):
                     epochs=request.epochs,
                     learning_rate=request.learning_rate,
                     progress_cb=_update,
+                    cancel_event=cancel_ev,
                 )
             else:
                 result = await trainer.create_modelfile_model(
@@ -470,6 +574,7 @@ async def _run_job(job_id: str, dataset_dir: Path, request: StartJobRequest):
                     output_dir=job_output_dir / "modelfile",
                     model_name=model_name,
                     progress_cb=_update,
+                    cancel_event=cancel_ev,
                 )
 
             result["ollama_model_name"] = model_name
@@ -490,16 +595,24 @@ async def _run_job(job_id: str, dataset_dir: Path, request: StartJobRequest):
 
         await _save_job_to_db(job_id, request, dataset_info, result)
 
+    except asyncio.CancelledError as exc:
+        reason = str(exc) if str(exc) else "utilisateur"
+        _JOBS[job_id]["status"] = "cancelled"
+        _JOBS[job_id]["logs"].append(f"Fine-tuning annulé ({reason}).")
+        logger.info("finetune_job_cancelled", job=job_id, reason=reason)
+        await _broadcast(job_id)
     except Exception as exc:
-        logger.error("finetune_job_error", job=job_id, error=str(exc), exc_info=True)
-        _JOBS[job_id]["status"] = "failed"
-        _JOBS[job_id]["error"] = str(exc)
-        _JOBS[job_id]["logs"].append(f"ERREUR : {exc}")
-        for ws in list(_WS_CLIENTS.get(job_id, [])):
-            try:
-                await ws.send_json(_JOBS[job_id])
-            except Exception:
-                pass
+        if cancel_ev.is_set():
+            # Exception levée depuis un thread d'entraînement après cancel
+            _JOBS[job_id]["status"] = "cancelled"
+            _JOBS[job_id]["logs"].append("Fine-tuning annulé pendant l'entraînement.")
+            logger.info("finetune_job_cancelled_in_training", job=job_id)
+        else:
+            logger.error("finetune_job_error", job=job_id, error=str(exc), exc_info=True)
+            _JOBS[job_id]["status"] = "failed"
+            _JOBS[job_id]["error"] = str(exc)
+            _JOBS[job_id]["logs"].append(f"ERREUR : {exc}")
+        await _broadcast(job_id)
 
 
 async def _run_milvus_reindex(job_id: str, model_path: str):

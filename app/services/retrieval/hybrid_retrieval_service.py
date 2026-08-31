@@ -199,5 +199,6 @@ class HybridRetrievalService:
                 "doc_type": doc.get("doc_type", ""),
                 "institution": doc.get("institution", ""),
                 "jurisdiction": doc.get("jurisdiction", ""),
+                "article_ref": doc.get("article_ref", ""),
             },
         )

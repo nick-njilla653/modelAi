@@ -95,6 +95,9 @@ class Chunk(Base):
     token_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     language: Mapped[str] = mapped_column(String(10), nullable=False, default="unknown")
     chunk_strategy: Mapped[str] = mapped_column(String(32), default="fixed_size")
+    # Référence citable (« Article 103 »), suffixée « (suite) » si héritée de
+    # l'article précédent lors d'une continuation de page.
+    article_ref: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     milvus_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     es_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     ingested_at: Mapped[datetime] = mapped_column(
@@ -284,3 +287,72 @@ class EvaluationComparison(Base):
     job: Mapped["FinetuneJob"] = relationship("FinetuneJob", back_populates="evaluations")
 
     __table_args__ = (Index("ix_eval_comparisons_job_id", "job_id"),)
+
+
+class SessionDocument(Base):
+    """
+    Document attaché à une conversation, et à elle seule.
+
+    Distinct de `Document` : celui-ci nourrit le corpus global et devient
+    visible de toutes les conversations ; celui-là ne quitte jamais la sienne.
+
+    L'isolement est structurel et non conditionnel : ces documents ne sont
+    écrits ni dans Milvus ni dans Elasticsearch. Un filtre `session_id` oublié
+    dans un seul chemin de récupération suffirait sinon à faire apparaître la
+    pièce jointe d'un utilisateur dans la réponse faite à un autre — un défaut
+    qui ne s'annonce pas.
+    """
+    __tablename__ = "session_documents"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    session_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False
+    )
+    filename: Mapped[str] = mapped_column(String(512), nullable=False)
+    #: Libellé cité dans les réponses ; par défaut le nom du fichier.
+    source: Mapped[str] = mapped_column(String(512), nullable=False)
+    language: Mapped[str] = mapped_column(String(10), default="unknown")
+    doc_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    page_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    ocr_used: Mapped[bool] = mapped_column(Boolean, default=False)
+    chunk_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    chunks: Mapped[list["SessionDocumentChunk"]] = relationship(
+        "SessionDocumentChunk",
+        back_populates="document",
+        cascade="all, delete-orphan",
+    )
+
+
+class SessionDocumentChunk(Base):
+    """
+    Un passage d'un document de conversation, avec son vecteur.
+
+    Le vecteur est stocké ici plutôt que dans Milvus : une pièce jointe fait
+    quelques dizaines de passages, une comparaison en mémoire est instantanée,
+    et rien ne peut alors fuir vers le corpus partagé.
+    """
+    __tablename__ = "session_document_chunks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    document_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("session_documents.id", ondelete="CASCADE"), nullable=False
+    )
+    session_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    chunk_index: Mapped[int] = mapped_column(Integer, default=0)
+    page: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    article_ref: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    token_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    #: Vecteur d'embedding, sérialisé en JSON.
+    embedding: Mapped[Optional[list[float]]] = mapped_column(JSON, nullable=True)
+
+    document: Mapped["SessionDocument"] = relationship(
+        "SessionDocument", back_populates="chunks"
+    )
+
+
+Index("ix_session_document_chunks_session", SessionDocumentChunk.session_id)

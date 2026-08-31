@@ -189,9 +189,19 @@ const query = {
           const raw = line.slice(6);
 
           // Marqueurs spéciaux (non JSON)
-          if (raw.trim() === '[DONE]') return;
+          if (raw.trim() === '[DONE]') {
+            // Si aucun token reçu, vider la bulle (état indéfini → message d'erreur générique)
+            if (!started) {
+              bubble.textContent = 'Aucune réponse reçue. Vérifiez que le modèle LLM est chargé dans Ollama.';
+            }
+            return;
+          }
           if (raw.trim().startsWith('[ERROR]')) {
-            bubble.textContent = raw.trim();
+            const errMsg = raw.trim().replace(/^\[ERROR\]\s*/, '');
+            bubble.textContent = `⚠ ${errMsg}`;
+            bubble.style.color = 'var(--error, #dc2626)';
+            toast(errMsg, 'error');
+            started = true; // évite le message générique du [DONE]
             return;
           }
 
@@ -400,7 +410,7 @@ function renderAIResponse(aiEl, res) {
           <div>
             <div>
               <span class="citation-source">${escHtml(c.doc_title || c.source || '—')}</span>
-              ${c.article ? `<span class="citation-page"> · Art. ${escHtml(c.article)}</span>` : ''}
+              ${c.article ? `<span class="citation-page"> · ${escHtml(c.article)}</span>` : ''}
               ${c.page ? `<span class="citation-page"> · p. ${c.page}</span>` : ''}
               ${c.jurisdiction ? `<span class="citation-page"> · ${escHtml(c.jurisdiction)}</span>` : ''}
               ${relScore !== undefined ? `<span class="citation-score"> · ${(relScore*100).toFixed(0)}%</span>` : ''}
@@ -976,7 +986,7 @@ const ft = {
     }
   },
 
-  _showProgressCard(_jobId) {
+  _showProgressCard(jobId) {
     const card = $('ftProgressCard');
     card.style.display = 'block';
     $('ftProgressBar').style.width = '0%';
@@ -988,19 +998,107 @@ const ft = {
     if (lkReport) lkReport.style.display = 'none';
     this._leakageShown = false;
     this._corpusShown  = false;
+    // Réinitialiser le retry WebSocket et le polling éventuel
+    this._wsRetries = 0;
+    this._wsJobId   = null;
+    if (this._pollInterval) { clearInterval(this._pollInterval); this._pollInterval = null; }
+
+    // Afficher les boutons de contrôle et câbler les handlers
+    const controls = $('ftJobControls');
+    if (controls) {
+      controls.style.display = 'flex';
+      $('btnFtPause').style.display  = '';
+      $('btnFtResume').style.display = 'none';
+
+      $('btnFtCancel').onclick = async () => {
+        if (!confirm('Annuler le fine-tuning en cours ? Cette action est irréversible.')) return;
+        try {
+          await fetch(`${API.BASE}${API.V1}/finetune/jobs/${jobId}/cancel`, { method: 'POST' });
+          toast('Annulation demandée…', 'warning');
+        } catch { toast('Impossible d\'annuler (réseau)', 'error'); }
+      };
+      $('btnFtPause').onclick = async () => {
+        try {
+          await fetch(`${API.BASE}${API.V1}/finetune/jobs/${jobId}/pause`, { method: 'POST' });
+          toast('Mise en pause…', 'info');
+        } catch { toast('Impossible de mettre en pause', 'error'); }
+      };
+      $('btnFtResume').onclick = async () => {
+        try {
+          await fetch(`${API.BASE}${API.V1}/finetune/jobs/${jobId}/resume`, { method: 'POST' });
+          toast('Reprise en cours…', 'info');
+        } catch { toast('Impossible de reprendre', 'error'); }
+      };
+    }
+
     card.scrollIntoView({ behavior: 'smooth', block: 'start' });
   },
 
   _connectWs(jobId) {
-    if (this.ws) { try { this.ws.close(); } catch(e){} }
-    const wsUrl = `ws://localhost:8000/api/v1/finetune/progress/${jobId}`;
-    this.ws = new WebSocket(wsUrl);
-    this.ws.onmessage = (e) => {
-      const data = JSON.parse(e.data);
-      if (data.ping) return;
-      this._updateProgress(data);
+    // Fermeture propre du WS précédent (évite "closed before established")
+    if (this.ws && this.ws.readyState !== WebSocket.CLOSED) {
+      this.ws.onclose = null; // désactive le retry de l'ancien WS
+      this.ws.close();
+    }
+
+    this._wsJobId   = jobId;
+    this._wsRetries = this._wsRetries || 0;
+
+    // URL dérivée de window.location → pas de cross-origin, Edge Tracking OK
+    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    const wsUrl = `${proto}://${window.location.host}/api/v1/finetune/progress/${jobId}`;
+
+    try {
+      this.ws = new WebSocket(wsUrl);
+    } catch (e) {
+      this._startPolling(jobId);
+      return;
+    }
+
+    this.ws.onopen = () => {
+      this._wsRetries = 0;
+      // Annuler le polling si on avait basculé dessus
+      if (this._pollInterval) { clearInterval(this._pollInterval); this._pollInterval = null; }
     };
-    this.ws.onerror = () => toast('Connexion WebSocket perdue', 'warning');
+
+    this.ws.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.ping) return;
+        this._updateProgress(data);
+      } catch { /* ignore JSON malformé */ }
+    };
+
+    this.ws.onerror = () => { /* géré dans onclose */ };
+
+    this.ws.onclose = () => {
+      if (this._wsJobId !== jobId) return; // job changé, ne pas retenter
+      if (this._wsRetries < 5) {
+        this._wsRetries++;
+        const delay = Math.min(500 * Math.pow(2, this._wsRetries), 15000);
+        setTimeout(() => this._connectWs(jobId), delay);
+      } else {
+        // 5 échecs → fallback polling REST
+        this._startPolling(jobId);
+      }
+    };
+  },
+
+  _startPolling(jobId) {
+    if (this._pollInterval) clearInterval(this._pollInterval);
+    toast('WebSocket indisponible — suivi en mode polling (3 s)', 'warning');
+    this._pollInterval = setInterval(async () => {
+      try {
+        const r = await fetch(`${API.BASE}${API.V1}/finetune/jobs/${jobId}`);
+        if (!r.ok) return;
+        const data = await r.json();
+        this._updateProgress(data);
+        if (['completed', 'failed', 'cancelled'].includes(data.status)) {
+          clearInterval(this._pollInterval);
+          this._pollInterval = null;
+        }
+      } catch { /* réseau temporairement indisponible */ }
+    }, 3000);
   },
 
   _updateProgress(job) {
@@ -1043,17 +1141,46 @@ const ft = {
       }
     }
 
+    // ── Boutons Cancel / Pause / Resume ──────────────────────────────────
+    const controls  = $('ftJobControls');
+    const pauseBtn  = $('btnFtPause');
+    const resumeBtn = $('btnFtResume');
+    const cancelBtn = $('btnFtCancel');
+    const activeStatuses = ['running', 'dataset_building', 'leakage_check', 'ingesting_corpus', 'training', 'cancelling'];
+
+    if (controls) {
+      const isActive = activeStatuses.includes(job.status);
+      const isPaused = job.status === 'paused';
+
+      controls.style.display = (isActive || isPaused) ? 'flex' : 'none';
+      if (pauseBtn)  pauseBtn.style.display  = isPaused ? 'none' : '';
+      if (resumeBtn) resumeBtn.style.display = isPaused ? '' : 'none';
+      if (cancelBtn) cancelBtn.disabled = job.status === 'cancelling';
+    }
+
     if (job.status === 'completed') {
       $('ftProgressCard').querySelector('h3').innerHTML =
         '<i class="fas fa-check-circle" style="color:var(--success)"></i> Entraînement terminé !';
       $('ftProgressActions').style.display = 'flex';
+      if (controls) controls.style.display = 'none';
       if (job.result?.loss_history?.length) this._drawLossCurve(job.result.loss_history);
       this.loadJobs();
       this.loadActiveModels();
+    } else if (job.status === 'cancelled') {
+      $('ftProgressCard').querySelector('h3').innerHTML =
+        '<i class="fas fa-ban" style="color:var(--warning,#f59e0b)"></i> Fine-tuning annulé';
+      if (controls) controls.style.display = 'none';
+      if (this._pollInterval) { clearInterval(this._pollInterval); this._pollInterval = null; }
+      this._wsJobId = null;
+      toast('Fine-tuning annulé.', 'warning');
     } else if (job.status === 'failed') {
       $('ftProgressCard').querySelector('h3').innerHTML =
         '<i class="fas fa-times-circle" style="color:var(--error)"></i> Échec du fine-tuning';
+      if (controls) controls.style.display = 'none';
       toast('Erreur fine-tuning : ' + (job.error || 'inconnue'), 'error');
+    } else if (job.status === 'paused') {
+      $('ftProgressCard').querySelector('h3').innerHTML =
+        '<i class="fas fa-pause-circle" style="color:var(--primary)"></i> En pause — en attente de reprise';
     }
   },
 

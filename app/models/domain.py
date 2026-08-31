@@ -34,6 +34,12 @@ class IntentType(str, Enum):
     NORMATIVE = "normative_query"
     COMPARATIVE = "comparative_query"
     DOCUMENT_REQUEST = "document_request"
+    # Vue d'ensemble d'un document entier (« résume le Code pénal ») : insoluble
+    # par le retrieval top-k, traitée par parcours structurel du corpus.
+    AGGREGATIVE = "aggregative_query"
+    # Salutation, remerciement, question sur l'assistant : aucune recherche
+    # documentaire n'a de sens, et en déclencher une produit du hors-sujet cité.
+    CHITCHAT = "chitchat"
     OUT_OF_SCOPE = "out_of_scope"
     UNKNOWN = "unknown"
 

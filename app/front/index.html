@@ -246,16 +246,18 @@
         </button>
       </div>
 
-      <div class="health-grid" id="healthGrid">
-        <div class="health-card loading">
-          <div class="spinner-sm"></div>
-          <span>Chargement…</span>
+      <div class="tab-body">
+        <div class="health-grid" id="healthGrid">
+          <div class="health-card loading">
+            <div class="spinner-sm"></div>
+            <span>Chargement…</span>
+          </div>
         </div>
-      </div>
 
-      <div class="health-raw card">
-        <h3><i class="fas fa-code"></i> Réponse brute</h3>
-        <pre id="healthRaw">—</pre>
+        <div class="health-raw card">
+          <h3><i class="fas fa-code"></i> Réponse brute</h3>
+          <pre id="healthRaw">—</pre>
+        </div>
       </div>
     </section>
 
@@ -268,6 +270,7 @@
         </button>
       </div>
 
+      <div class="tab-body">
       <div class="ft-layout">
 
         <!-- ── Colonne gauche : upload + config ─────────────────────── -->
@@ -304,7 +307,7 @@
               <div class="form-group">
                 <label>Cible d'entraînement</label>
                 <select id="ftTarget">
-                  <option value="llm">LLM (llama3.2 via Ollama Modelfile)</option>
+                  <option value="llm">LLM (Ollama Modelfile)</option>
                   <option value="embedding">Embedding (mxbai-embed-large)</option>
                   <option value="reranker">Reranker (bge-reranker-v2-m3)</option>
                 </select>
@@ -391,6 +394,19 @@
             <div id="ftProgressPct" class="ft-progress-pct">0%</div>
             <div id="ftProgressLog" class="ft-progress-log"></div>
 
+            <!-- Contrôles de job : Annuler / Pause / Reprendre -->
+            <div id="ftJobControls" class="ft-job-controls" style="display:none">
+              <button class="btn-danger" id="btnFtCancel">
+                <i class="fas fa-stop-circle"></i> Annuler
+              </button>
+              <button class="btn-secondary" id="btnFtPause">
+                <i class="fas fa-pause-circle"></i> Pause
+              </button>
+              <button class="btn-primary" id="btnFtResume" style="display:none">
+                <i class="fas fa-play-circle"></i> Reprendre
+              </button>
+            </div>
+
             <!-- Rapport data leakage (affiché dès que le check est terminé) -->
             <div id="ftLeakageReport" class="ft-leakage-report" style="display:none">
               <div class="ft-leakage-header">
@@ -453,7 +469,8 @@
             <div id="ftSampleResponses" class="ft-samples" style="display:none"></div>
           </div>
         </div>
-      </div>
+      </div><!-- /.ft-layout -->
+      </div><!-- /.tab-body -->
     </section>
 
   </main>

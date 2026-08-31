@@ -9,6 +9,14 @@ Schéma ontologique :
   (Article)-[:MODIFIE]->(Article)
   (Concept)-[:DEFINI_DANS]->(Article)
   (Institution)-[:EMETRICE_DE]->(TexteNormatif)
+  (Article)-[:MENTIONNE]->(Institution)
+
+État du peuplement : `TexteNormatif`, `Article`, `Institution` et les relations
+`A_ARTICLE`, `REFERENCE`, `EMETRICE_DE`, `MENTIONNE` sont écrits par
+`app.services.knowledge_graph.graph_builder`. `Concept`, `ABROGE` et `MODIFIE`
+restent déclarés au schéma sans écrivain : ce sont des extensions prévues, non
+des données disponibles. Le lecteur ne doit donc pas les interroger comme si
+elles l'étaient.
 """
 from __future__ import annotations
 

@@ -115,6 +115,29 @@ body {
 .tab { display: none; flex-direction: column; height: 100%; overflow: hidden; }
 .tab.active { display: flex; }
 
+/* Conteneur scrollable générique sous le tab-header */
+.tab-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ── Scrollbars uniformes (WebKit + Firefox) ───────────────────────── */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--gray-300) transparent;
+}
+*::-webkit-scrollbar        { width: 6px; height: 6px; }
+*::-webkit-scrollbar-track  { background: transparent; }
+*::-webkit-scrollbar-thumb  {
+  background: var(--gray-300);
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-thumb:hover { background: var(--gray-400); }
+
 .tab-header {
   padding: 14px 20px;
   background: white;
@@ -637,7 +660,6 @@ body {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
-  padding: 16px;
 }
 .health-card {
   background: white;
@@ -666,9 +688,7 @@ body {
 .health-card.degraded .health-card-status { color: var(--warning); }
 .health-card.error    .health-card-status { color: var(--danger); }
 
-.health-raw {
-  margin: 0 16px 16px;
-}
+.health-raw { }
 .health-raw pre {
   background: var(--gray-50);
   border: 1px solid var(--gray-200);
@@ -819,6 +839,21 @@ body {
 .ft-warning i { color: var(--warning); flex-shrink: 0; margin-top: 2px; }
 .ft-warning strong { color: var(--warning); }
 .ft-warning code { background: rgba(0,0,0,.06); padding: 1px 4px; border-radius: 3px; font-size: .75rem; }
+
+/* ── Contrôles job : Cancel / Pause / Resume ─────────────────── */
+.ft-job-controls {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 12px; flex-wrap: wrap;
+}
+.btn-danger {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 14px; border-radius: var(--radius-sm); border: none;
+  background: #dc2626; color: #fff;
+  font-size: .82rem; font-weight: 600; cursor: pointer;
+  transition: background .2s;
+}
+.btn-danger:hover    { background: #b91c1c; }
+.btn-danger:disabled { background: var(--gray-300); cursor: not-allowed; }
 
 /* ── Rapport leakage dynamique ──────────────────────────────────── */
 .ft-leakage-report {

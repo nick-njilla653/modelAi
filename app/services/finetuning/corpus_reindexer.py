@@ -64,6 +64,9 @@ class CorpusReindexer:
         pages    = [c.get("page", 0) or 0 for c in chunks]
         indexes  = [c.get("chunk_index", 0) for c in chunks]
         doc_types = [c.get("doc_type", "") for c in chunks]
+        institutions = [c.get("institution", "") for c in chunks]
+        jurisdictions = [c.get("jurisdiction", "") for c in chunks]
+        article_refs = [c.get("article_ref", "") for c in chunks]
 
         # Suppression de l'ancienne collection Milvus
         if progress_cb:
@@ -103,6 +106,9 @@ class CorpusReindexer:
                 pages=pages[start : start + batch_size],
                 chunk_indexes=indexes[start : start + batch_size],
                 doc_types=doc_types[start : start + batch_size],
+                institutions=institutions[start : start + batch_size],
+                jurisdictions=jurisdictions[start : start + batch_size],
+                article_refs=article_refs[start : start + batch_size],
             )
 
             reindexed += len(batch_texts)
@@ -175,7 +181,7 @@ class CorpusReindexer:
                 "ingested": ingested,
                 "failed": failed,
                 "total": len(files),
-                "message": f"{ingested}/{len(files)} documents ingérés dans le corpus (KG + Milvus + ES)",
+                "message": f"{ingested}/{len(files)} documents ingérés (PostgreSQL + Milvus + Elasticsearch + graphe)",
             }
 
         finally:
@@ -221,8 +227,11 @@ class CorpusReindexer:
                         Chunk.language,
                         Chunk.page,
                         Chunk.chunk_index,
+                        Chunk.article_ref,
                         Document.source,
                         Document.doc_type,
+                        Document.institution,
+                        Document.jurisdiction,
                     ).join(Document, Chunk.doc_id == Document.id)
                 )).all()
 
@@ -236,6 +245,9 @@ class CorpusReindexer:
                         "chunk_index": r.chunk_index,
                         "source": r.source or "",
                         "doc_type": r.doc_type or "",
+                        "institution": r.institution or "",
+                        "jurisdiction": r.jurisdiction or "",
+                        "article_ref": r.article_ref or "",
                     }
                     for r in rows
                 ]

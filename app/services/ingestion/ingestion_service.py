@@ -11,14 +11,18 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Awaitable, Callable, Optional
 
 from app.core.config import get_settings
 from app.core.exceptions import IngestionError
 from app.core.logging import get_logger
 from app.models.domain import IngestionStatus, Language
 from app.models.schemas import IngestRequest, IngestResponse
-from app.services.ingestion.chunker import ChunkResult, chunk_document
+from app.services.ingestion.chunker import (
+    ChunkResult,
+    chunk_document,
+    consolidate_article_chunks,
+)
 from app.services.ingestion.metadata_extractor import DocumentMetadata, extract_metadata
 from app.services.ingestion.ocr_processor import ocr_image_bytes
 from app.services.ingestion.pdf_extractor import ExtractedDocument, extract_pdf_text, extract_pdf_as_images
@@ -61,6 +65,7 @@ class IngestionService:
         file_path: str | Path,
         request: IngestRequest,
         document_id: Optional[str] = None,
+        progress_cb: Optional[Callable[[str, int, str], Awaitable[None]]] = None,
     ) -> IngestionResult:
         """
         Ingère un document complet.
@@ -69,6 +74,10 @@ class IngestionService:
             file_path: Chemin vers le fichier (PDF ou texte)
             request: Métadonnées fournies par l'utilisateur
             document_id: ID forcé (sinon auto-généré)
+            progress_cb: Rappel (étape, pourcentage, détail) pour suivre
+                l'avancement. L'OCR d'un document scanné dure plusieurs minutes :
+                sans retour d'étape, l'appelant ne peut pas distinguer un
+                traitement long d'un blocage.
 
         Returns:
             IngestionResult avec les chunks créés et les métadonnées
@@ -77,6 +86,13 @@ class IngestionService:
         doc_id = document_id or str(uuid.uuid4())
         path = Path(file_path)
         warnings: list[str] = []
+
+        async def report(stage: str, percent: int, detail: str = "") -> None:
+            if progress_cb is not None:
+                try:
+                    await progress_cb(stage, percent, detail)
+                except Exception as exc:  # le suivi ne doit jamais casser l'ingestion
+                    logger.warning("progress_callback_failed", error=str(exc))
 
         logger.info(
             "ingestion_started",
@@ -87,8 +103,9 @@ class IngestionService:
 
         try:
             # ── Étape 1 : Extraction du texte ────────────────────────────────
+            await report("extraction", 5, "Lecture du document")
             raw_text, pages_content, ocr_used = await self._extract_text(
-                path, request.force_ocr, warnings
+                path, request.force_ocr, warnings, report
             )
 
             if not raw_text.strip():
@@ -104,6 +121,7 @@ class IngestionService:
             metadata.page_count = len(pages_content) if pages_content else 1
 
             # ── Étape 3 : Nettoyage page par page + chunking ─────────────────
+            await report("chunking", 55, "Découpage en articles")
             all_chunks: list[ChunkResult] = []
             global_chunk_index = 0
 
@@ -134,6 +152,12 @@ class IngestionService:
                     overlap_tokens=self.settings.chunk_overlap,
                 )
 
+            # Recolle les articles coupés par une frontière de page et propage la
+            # référence citable aux chunks de continuation (chunking page par page).
+            all_chunks = consolidate_article_chunks(
+                all_chunks, language=metadata.language.value
+            )
+
             if not all_chunks:
                 raise IngestionError(f"Aucun chunk créé pour {path.name}")
 
@@ -145,10 +169,24 @@ class IngestionService:
             )
 
             # ── Étape 4 : Embedding + Indexation ─────────────────────────────
+            await report(
+                "indexation", 70,
+                f"Calcul des vecteurs et indexation de {len(all_chunks)} passages",
+            )
             await self._index_chunks(doc_id, all_chunks, metadata, request)
 
             # ── Étape 5 : Persistance PostgreSQL ─────────────────────────────
+            await report("persistance", 90, "Enregistrement des métadonnées")
             await self._persist_to_db(doc_id, path, metadata, all_chunks, ocr_used, request)
+
+            # ── Étape 6 : Graphe de connaissances ────────────────────────────
+            # Réservé au corpus global. Les pièces jointes de conversation
+            # passent par `extract_and_chunk` et n'atteignent jamais ce point :
+            # le graphe est partagé par toutes les conversations.
+            await report("graphe", 96, "Construction du graphe de connaissances")
+            await self._build_graph(doc_id, metadata, all_chunks, warnings)
+
+            await report("termine", 100, f"{len(all_chunks)} passages indexés")
 
             latency_ms = (time.perf_counter() - start_time) * 1000
             logger.info(
@@ -176,14 +214,134 @@ class IngestionService:
             logger.error("ingestion_failed", doc_id=doc_id, error=str(exc), exc_info=True)
             raise IngestionError(f"Erreur d'ingestion : {exc}") from exc
 
+    async def _build_graph(
+        self,
+        doc_id: str,
+        metadata: DocumentMetadata,
+        chunks: list[ChunkResult],
+        warnings: list[str],
+    ) -> None:
+        """
+        Alimente le graphe de connaissances à partir des articles du document.
+
+        Un échec ici ne doit pas faire échouer l'ingestion : le document reste
+        interrogeable par le corpus vectoriel et lexical même sans graphe. Mais
+        il est signalé, faute de quoi le graphe resterait vide en silence — ce
+        qui s'est produit jusqu'ici.
+        """
+        try:
+            import sqlalchemy as sa
+
+            from app.models.db_models import Document
+            from app.services.knowledge_graph.graph_builder import build_document_graph
+            from app.storage.postgres_client import get_db_session
+
+            # Les autres documents du corpus, pour résoudre un renvoi sortant
+            # vers leur véritable disposition plutôt que vers un nœud vide.
+            async with get_db_session() as db:
+                rows = (await db.execute(sa.select(Document.source, Document.id))).all()
+            corpus_titles = {source: identifier for source, identifier in rows}
+
+            stats = await build_document_graph(
+                doc_id=doc_id,
+                title=metadata.source,
+                doc_type=metadata.doc_type.value if metadata.doc_type else None,
+                jurisdiction=metadata.jurisdiction,
+                chunks=chunks,
+                corpus_titles=corpus_titles,
+                institution=metadata.institution,
+            )
+            logger.info("ingestion_graph_built", doc_id=doc_id, **{
+                k: v for k, v in stats.to_dict().items() if k != "external_texts"
+            })
+        except Exception as exc:
+            warnings.append(
+                f"Le graphe de connaissances n'a pas pu être alimenté : {exc}"
+            )
+            logger.warning("ingestion_graph_failed", doc_id=doc_id, error=str(exc))
+
+    async def extract_and_chunk(
+        self,
+        file_path: str | Path,
+        request: IngestRequest,
+    ) -> tuple[list[ChunkResult], DocumentMetadata, bool, list[str]]:
+        """
+        Extrait et découpe un document, sans rien persister ni indexer.
+
+        Sépare le traitement de sa destination. `ingest_document` s'en sert pour
+        alimenter le corpus global ; les pièces jointes d'une conversation s'en
+        servent pour rester chez elles. Sans cette séparation, attacher un
+        document à une conversation le versait au corpus de tous — la
+        persistance PostgreSQL s'exécutant quoi qu'il arrive.
+
+        Returns:
+            (passages, métadonnées, OCR utilisé, avertissements)
+        """
+        path = Path(file_path)
+        warnings: list[str] = []
+
+        raw_text, pages_content, ocr_used = await self._extract_text(
+            path, request.force_ocr, warnings
+        )
+        if not raw_text.strip():
+            raise IngestionError(f"Impossible d'extraire du texte de {path.name}")
+
+        metadata = extract_metadata(
+            text=raw_text[:5000],
+            filename=path.name,
+            source=request.source,
+            provided_metadata=request.model_dump(exclude_none=True),
+        )
+        metadata.page_count = len(pages_content) if pages_content else 1
+
+        all_chunks: list[ChunkResult] = []
+        global_index = 0
+
+        if pages_content:
+            for page_num, page_text in pages_content:
+                cleaned = clean_extracted_text(page_text, metadata.language.value)
+                if not is_content_sufficient(cleaned):
+                    continue
+                page_chunks = chunk_document(
+                    text=cleaned,
+                    strategy=request.chunking_strategy,
+                    max_tokens=self.settings.chunk_size,
+                    overlap_tokens=self.settings.chunk_overlap,
+                    page=page_num,
+                )
+                for chunk in page_chunks:
+                    chunk.chunk_index = global_index
+                    global_index += 1
+                all_chunks.extend(page_chunks)
+        else:
+            cleaned = clean_extracted_text(raw_text, metadata.language.value)
+            all_chunks = chunk_document(
+                text=cleaned,
+                strategy=request.chunking_strategy,
+                max_tokens=self.settings.chunk_size,
+                overlap_tokens=self.settings.chunk_overlap,
+            )
+
+        all_chunks = consolidate_article_chunks(
+            all_chunks, language=metadata.language.value
+        )
+        if not all_chunks:
+            raise IngestionError(f"Aucun chunk créé pour {path.name}")
+
+        return all_chunks, metadata, ocr_used, warnings
+
     async def _extract_text(
         self,
         path: Path,
         force_ocr: bool,
         warnings: list[str],
+        report: Optional[Callable[..., Awaitable[None]]] = None,
     ) -> tuple[str, list[tuple[int, str]], bool]:
         """
         Extrait le texte brut. Retourne (full_text, pages_list, ocr_used).
+
+        L'OCR est la phase la plus longue du pipeline — plusieurs secondes par
+        page. Elle rend donc l'avancement page par page.
         """
         suffix = path.suffix.lower()
 
@@ -204,11 +362,18 @@ class IngestionService:
                     "Certaines pages ont nécessité l'OCR (document scanné détecté)"
                 )
                 page_images = extract_pdf_as_images(path)
-                for page_num, img_bytes in page_images:
+                total_pages = len(page_images)
+                for index, (page_num, img_bytes) in enumerate(page_images, start=1):
                     ocr_text = ocr_image_bytes(
                         img_bytes, language=self.settings.tesseract_lang
                     )
                     pages_content.append((page_num, ocr_text))
+                    if report is not None and total_pages:
+                        # L'OCR occupe la tranche 5–50 % de la progression globale.
+                        percent = 5 + int(45 * index / total_pages)
+                        await report(
+                            "ocr", percent, f"Reconnaissance de texte : page {index}/{total_pages}"
+                        )
             else:
                 for page in extracted.pages:
                     pages_content.append((page.page_number, page.text))
@@ -249,6 +414,7 @@ class IngestionService:
         doc_types = [metadata.doc_type.value if metadata.doc_type else ""] * len(chunks)
         institutions = [metadata.institution or ""] * len(chunks)
         jurisdictions = [metadata.jurisdiction or ""] * len(chunks)
+        article_refs = [(c.article_ref or "")[:64] for c in chunks]
 
         milvus_ids = insert_chunks(
             chunk_ids=chunk_ids,
@@ -261,6 +427,7 @@ class IngestionService:
             doc_types=doc_types,
             institutions=institutions,
             jurisdictions=jurisdictions,
+            article_refs=article_refs,
             embeddings=embeddings,
         )
 
@@ -281,6 +448,7 @@ class IngestionService:
                 "doc_type": doc_types[i],
                 "institution": institutions[i],
                 "jurisdiction": jurisdictions[i],
+                "article_ref": article_refs[i],
             }
             for i in range(len(chunks))
         ]
@@ -328,6 +496,7 @@ class IngestionService:
                     token_count=chunk.token_count,
                     language=metadata.language.value,
                     chunk_strategy=chunk.strategy,
+                    article_ref=chunk.article_ref,
                 )
                 session.add(db_chunk)
 

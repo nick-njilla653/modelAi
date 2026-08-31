@@ -53,6 +53,8 @@ class DatasetBuilder:
         output_dir: str | Path,
         pairs_per_chunk: int = 3,
         progress_cb: Optional[Callable] = None,
+        cancel_event=None,
+        pause_event=None,
     ) -> dict:
         zip_path = Path(zip_path)
         tmp = zip_path.parent / f"_ft_extract_{zip_path.stem}"
@@ -60,7 +62,9 @@ class DatasetBuilder:
         try:
             with zipfile.ZipFile(zip_path, "r") as zf:
                 zf.extractall(tmp)
-            return await self.build_from_folder(tmp, output_dir, pairs_per_chunk, progress_cb)
+            return await self.build_from_folder(
+                tmp, output_dir, pairs_per_chunk, progress_cb, cancel_event, pause_event
+            )
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
@@ -70,7 +74,10 @@ class DatasetBuilder:
         output_dir: str | Path,
         pairs_per_chunk: int = 3,
         progress_cb: Optional[Callable] = None,
+        cancel_event=None,
+        pause_event=None,
     ) -> dict:
+        import asyncio
         folder = Path(folder)
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -83,6 +90,15 @@ class DatasetBuilder:
         embed_pairs: list[dict] = []
 
         for idx, fp in enumerate(files):
+            # Vérification cancel/pause entre chaque fichier
+            if cancel_event and cancel_event.is_set():
+                raise asyncio.CancelledError("dataset building")
+            if pause_event:
+                while not pause_event.is_set():
+                    if cancel_event and cancel_event.is_set():
+                        raise asyncio.CancelledError("dataset building")
+                    await asyncio.sleep(0.4)
+
             if progress_cb:
                 pct = int((idx / len(files)) * 55)
                 await progress_cb(pct, f"Lecture : {fp.name}")

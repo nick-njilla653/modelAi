@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
+from app.core.config import get_settings
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -232,9 +233,51 @@ class ModelManager:
 
     def _load_registry(self) -> dict:
         try:
-            return json.loads(_REGISTRY_PATH.read_text(encoding="utf-8"))
+            registry = json.loads(_REGISTRY_PATH.read_text(encoding="utf-8"))
         except Exception:
             return self._default_registry()
+        return self._reconcile_with_config(registry)
+
+    def _reconcile_with_config(self, registry: dict) -> dict:
+        """
+        Aligne les entrées « modèle de base » sur la configuration courante.
+
+        Le registre n'était renseigné qu'à sa création : changer LLM_MODEL dans
+        la configuration laissait ensuite le registre désigner l'ancien modèle
+        indéfiniment. Un retour arrière restaurait alors un état qui ne
+        correspondait à rien de réel.
+
+        La règle : une entrée SANS job_id désigne un modèle de base, elle suit
+        donc la configuration. Une entrée AVEC job_id résulte d'un fine-tuning
+        délibérément appliqué — la configuration ne doit pas l'écraser.
+        """
+        settings = get_settings()
+        expected = {
+            "llm_model": ("ollama_model_name", settings.llm_model),
+            "embedding_model": ("model_path", settings.embedding_model),
+            "reranker_model": ("model_path", settings.reranker_model),
+        }
+
+        changed = False
+        for key, (field, configured) in expected.items():
+            entry = registry.get(key)
+            if not isinstance(entry, dict) or entry.get("job_id"):
+                # Modèle issu d'un fine-tuning : il fait autorité.
+                continue
+            if entry.get(field) != configured:
+                logger.info(
+                    "registry_realigned",
+                    model_type=key,
+                    was=entry.get(field),
+                    now=configured,
+                )
+                entry[field] = configured
+                entry["applied_at"] = _now_iso()
+                changed = True
+
+        if changed:
+            self._save_registry(registry)
+        return registry
 
     def _save_registry(self, data: dict):
         _REGISTRY_PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")

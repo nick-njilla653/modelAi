@@ -31,14 +31,31 @@ async def lifespan(app: FastAPI):
     logger.info("govai2_starting", version="2.0.0-sprint3", env=settings.app_env)
 
     # ── Startup ──────────────────────────────────────────────────────────────
-    # ── Migration PostgreSQL (create_all si tables absentes) ─────────────────
+    # ── Schéma PostgreSQL ────────────────────────────────────────────────────
+    # `create_all` ne s'exécute que sur une base vierge. Sur une base déjà
+    # versionnée par Alembic, il créerait les tables des migrations en attente
+    # avant qu'elles ne soient appliquées : la migration échouerait ensuite sur
+    # « relation already exists », et la version resterait figée en arrière.
+    # Les deux mécanismes se disputaient le schéma ; celui-ci tranche.
     try:
-        from app.storage.postgres_client import get_engine
+        import sqlalchemy as sa
+
         from app.models.db_models import Base
+        from app.storage.postgres_client import get_engine
+
         _engine = get_engine()
         async with _engine.begin() as _conn:
-            await _conn.run_sync(Base.metadata.create_all)
-        logger.info("postgres_schema_ready")
+            versioned = await _conn.run_sync(
+                lambda sync_conn: sa.inspect(sync_conn).has_table("alembic_version")
+            )
+            if versioned:
+                logger.info(
+                    "postgres_schema_managed_by_alembic",
+                    hint="alembic upgrade head pour appliquer les migrations en attente",
+                )
+            else:
+                await _conn.run_sync(Base.metadata.create_all)
+                logger.info("postgres_schema_created")
     except Exception as exc:
         logger.warning("postgres_schema_init_failed", error=str(exc))
 
@@ -151,10 +168,32 @@ def create_app() -> FastAPI:
     from app.api.v1 import api_router as api_router_v2
     app.include_router(api_router_v2, prefix=settings.api_v1_prefix)
 
-    # ── Fichiers statiques (interface web) ───────────────────────────────────
-    _front_dir = Path(__file__).resolve().parent / "front"
-    if _front_dir.exists():
-        app.mount("/ui", StaticFiles(directory=str(_front_dir), html=True), name="front")
+    # ── Fichiers statiques (interfaces web) ──────────────────────────────────
+    # L'ancienne interface reste servie sous /ui/legacy : elle porte encore les
+    # onglets Ingestion, Évaluation et Fine-Tuning, non repris par la nouvelle.
+    _repo_root = Path(__file__).resolve().parent.parent
+    _legacy_dir = Path(__file__).resolve().parent / "front"
+    if _legacy_dir.exists():
+        app.mount(
+            "/ui/legacy",
+            StaticFiles(directory=str(_legacy_dir), html=True),
+            name="front-legacy",
+        )
+
+    # Interface React (frontend/dist). Produite par `npm run build` côté hôte :
+    # l'image applicative n'embarque pas Node.
+    _webui_dir = _repo_root / "frontend" / "dist"
+    if _webui_dir.exists():
+        app.mount("/ui", StaticFiles(directory=str(_webui_dir), html=True), name="webui")
+        logger.info("webui_mounted", path=str(_webui_dir))
+    elif _legacy_dir.exists():
+        # Sans build disponible, /ui sert l'ancienne interface plutôt qu'un 404.
+        app.mount("/ui", StaticFiles(directory=str(_legacy_dir), html=True), name="front")
+        logger.warning(
+            "webui_build_missing",
+            expected=str(_webui_dir),
+            hint="Lancez `npm run build` dans frontend/ pour servir la nouvelle interface",
+        )
 
     # ── Routes de base ────────────────────────────────────────────────────────
     @app.get("/", include_in_schema=False)

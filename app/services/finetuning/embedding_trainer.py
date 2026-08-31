@@ -29,6 +29,8 @@ class EmbeddingTrainer:
         learning_rate: float = 2e-5,
         warmup_ratio: float = 0.1,
         progress_cb: Optional[Callable] = None,
+        cancel_event=None,
+        pause_event=None,
     ) -> dict:
         """Lance l'entraînement et retourne les métriques."""
         import asyncio
@@ -46,6 +48,8 @@ class EmbeddingTrainer:
                 learning_rate,
                 warmup_ratio,
                 progress_cb,
+                cancel_event,
+                pause_event,
             )
         return result
 
@@ -58,7 +62,10 @@ class EmbeddingTrainer:
         learning_rate,
         warmup_ratio,
         progress_cb,
+        cancel_event=None,
+        pause_event=None,
     ) -> dict:
+        import time
         from sentence_transformers import SentenceTransformer, InputExample, losses
         from torch.utils.data import DataLoader
 
@@ -101,21 +108,34 @@ class EmbeddingTrainer:
                     except Exception:
                         pass
 
-        model.fit(
-            train_objectives=[(loader, loss_fn)],
-            epochs=epochs,
-            warmup_steps=warmup_steps,
-            optimizer_params={"lr": learning_rate},
-            output_path=str(out),
-            show_progress_bar=False,
-            callback=_CB(),
-        )
+        # Entraînement époque par époque pour permettre cancel/pause entre chaque époque
+        completed_epochs = 0
+        for epoch in range(epochs):
+            if cancel_event and cancel_event.is_set():
+                raise RuntimeError("__ft_cancelled__")
+            if pause_event:
+                while not pause_event.is_set():
+                    if cancel_event and cancel_event.is_set():
+                        raise RuntimeError("__ft_cancelled__")
+                    time.sleep(0.4)
 
-        logger.info("embedding_training_done", output=str(out))
+            epoch_warmup = warmup_steps if epoch == 0 else 0
+            model.fit(
+                train_objectives=[(loader, loss_fn)],
+                epochs=1,
+                warmup_steps=epoch_warmup,
+                optimizer_params={"lr": learning_rate},
+                output_path=str(out),
+                show_progress_bar=False,
+                callback=_CB(),
+            )
+            completed_epochs += 1
+
+        logger.info("embedding_training_done", output=str(out), completed_epochs=completed_epochs)
         return {
             "output_path": str(out),
             "examples_trained": len(examples),
-            "epochs": epochs,
+            "epochs": completed_epochs,
             "loss_history": loss_history,
         }
 

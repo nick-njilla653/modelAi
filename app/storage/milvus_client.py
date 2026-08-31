@@ -53,6 +53,8 @@ def get_collection_schema(dim: int) -> CollectionSchema:
         FieldSchema(name="doc_type", dtype=DataType.VARCHAR, max_length=64),
         FieldSchema(name="institution", dtype=DataType.VARCHAR, max_length=256),
         FieldSchema(name="jurisdiction", dtype=DataType.VARCHAR, max_length=256),
+        # Référence citable du chunk (« Article 103 »), extraite à l'ingestion.
+        FieldSchema(name="article_ref", dtype=DataType.VARCHAR, max_length=64),
         FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=dim),
     ]
     return CollectionSchema(
@@ -90,6 +92,30 @@ def ensure_collection() -> Collection:
     return _collection
 
 
+def drop_collection() -> bool:
+    """
+    Supprime la collection de chunks.
+
+    Nécessaire lorsque le schéma évolue : Milvus ne permet pas d'ajouter un champ
+    à une collection existante, la collection doit être recréée puis réindexée.
+
+    Returns:
+        True si une collection a effectivement été supprimée.
+    """
+    global _collection
+    settings = get_settings()
+    collection_name = settings.milvus_collection_chunks
+
+    _collection = None
+    if not utility.has_collection(collection_name):
+        logger.info("milvus_collection_absent", name=collection_name)
+        return False
+
+    utility.drop_collection(collection_name)
+    logger.warning("milvus_collection_dropped", name=collection_name)
+    return True
+
+
 def insert_chunks(
     chunk_ids: list[str],
     doc_ids: list[str],
@@ -101,13 +127,15 @@ def insert_chunks(
     doc_types: list[str],
     institutions: list[str],
     jurisdictions: list[str],
+    article_refs: list[str],
     embeddings: list[list[float]],
 ) -> list[int]:
     """Insère des chunks dans Milvus. Retourne les IDs auto-générés."""
     collection = ensure_collection()
     data = [
         chunk_ids, doc_ids, contents, sources, languages, pages,
-        chunk_indexes, doc_types, institutions, jurisdictions, embeddings,
+        chunk_indexes, doc_types, institutions, jurisdictions, article_refs,
+        embeddings,
     ]
     result = collection.insert(data)
     collection.flush()
@@ -135,7 +163,7 @@ def search_dense(
         output_fields=[
             "chunk_id", "doc_id", "content", "source",
             "language", "page", "chunk_index", "doc_type",
-            "institution", "jurisdiction",
+            "institution", "jurisdiction", "article_ref",
         ],
     )
 
@@ -153,6 +181,7 @@ def search_dense(
             "doc_type": hit.entity.get("doc_type", ""),
             "institution": hit.entity.get("institution", ""),
             "jurisdiction": hit.entity.get("jurisdiction", ""),
+            "article_ref": hit.entity.get("article_ref", ""),
             "dense_score": float(hit.score),
         })
     return hits

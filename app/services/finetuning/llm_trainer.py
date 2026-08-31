@@ -57,8 +57,10 @@ class LLMTrainer:
         temperature: float = 0.05,
         num_ctx: int = 8192,
         progress_cb: Optional[Callable] = None,
+        cancel_event=None,
     ) -> dict:
         """Génère un Modelfile enrichi et l'enregistre dans Ollama."""
+        import asyncio
         qa_path = Path(qa_pairs_path)
         out = Path(output_dir)
         out.mkdir(parents=True, exist_ok=True)
@@ -85,6 +87,9 @@ class LLMTrainer:
 
         modelfile_path = out / "Modelfile"
         modelfile_path.write_text(modelfile_content, encoding="utf-8")
+
+        if cancel_event and cancel_event.is_set():
+            raise asyncio.CancelledError("llm training")
 
         if progress_cb:
             await progress_cb(75, f"Création du modèle Ollama '{model_name}'…")
@@ -115,10 +120,13 @@ class LLMTrainer:
         learning_rate: float = 2e-4,
         lora_r: int = 16,
         progress_cb: Optional[Callable] = None,
+        cancel_event=None,
     ) -> dict:
         """Fine-tuning LoRA. Nécessite torch + transformers + peft + trl."""
-        self._check_lora_deps()
         import asyncio
+        self._check_lora_deps()
+        if cancel_event and cancel_event.is_set():
+            raise asyncio.CancelledError("lora training")
         from concurrent.futures import ThreadPoolExecutor
 
         loop = asyncio.get_event_loop()

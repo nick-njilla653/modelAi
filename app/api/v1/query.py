@@ -74,55 +74,50 @@ async def query(
 
 @router.post(
     "/query/stream",
-    summary="Requête en streaming (token par token)",
-    description="Génère la réponse en streaming SSE. Pas de citations structurées.",
+    summary="Requête en streaming (SSE)",
+    description=(
+        "Diffuse la réponse au fil de l'eau via le cycle cognitif complet. "
+        "Émet des événements JSON typés : meta (intention, plan), token "
+        "(fragments de texte), done (citations résolues, drapeaux, latence)."
+    ),
 )
 async def query_stream(
     request: QueryRequest,
     orchestrator=Depends(get_orchestrator_dep),
 ) -> StreamingResponse:
     """
-    Streaming token par token via Ollama.
-    Format : text/event-stream (SSE).
+    Streaming SSE passant par l'orchestrateur.
+
+    À 2 tokens par seconde, une réponse demande plusieurs minutes : le streaming
+    n'est pas un confort mais la condition d'utilisabilité de l'interface.
+    Les citations n'arrivent qu'à la fin — elles se déduisent des références
+    réellement écrites, donc du texte complet.
     """
-    from app.services.generation.llm_answer_service import LLMAnswerService
-    from app.services.retrieval.hybrid_retrieval_service import HybridRetrievalService
-    from app.models.domain import Language, UserProfile
+    import json as _json
 
-    async def _token_generator() -> AsyncGenerator[str, None]:
-        import json as _json
+    # Séparateur d'événement SSE : deux sauts de ligne closent un message.
+    sep = "\n\n"
+
+    async def _event_generator() -> AsyncGenerator[str, None]:
         try:
-            from app.services.embedding import get_embedding_service
-            retrieval_svc = HybridRetrievalService()
-            retrieval_svc.set_embedding_service(get_embedding_service())
-            language = request.language or Language.FR
-            chunks = await retrieval_svc.retrieve(
-                query=request.query,
-                language=language,
-                top_k=request.top_k,
-            )
-
-            generation_svc = LLMAnswerService()
-            async for token in generation_svc.generate_stream(
-                query=request.query,
-                retrieved_chunks=chunks,
-                language=language,
-                profile=request.profile or UserProfile.CITIZEN,
-                session_context=request.session_context or "",
-            ):
-                # JSON-encode le token pour préserver \n et tout caractère spécial
-                yield f"data: {_json.dumps(token)}\n\n"
-
-            yield "data: [DONE]\n\n"
+            async for event in orchestrator.process_stream(request):
+                payload = _json.dumps(event, ensure_ascii=False, default=str)
+                yield f"data: {payload}{sep}"
         except Exception as exc:
-            logger.error("stream_error", error=str(exc))
-            yield f"data: [ERROR] {exc}\n\n"
+            logger.error("stream_error", error=str(exc), exc_info=True)
+            payload = _json.dumps({"type": "error", "message": str(exc)})
+            yield f"data: {payload}{sep}"
+        finally:
+            yield f"data: [DONE]{sep}"
 
     return StreamingResponse(
-        _token_generator(),
+        _event_generator(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            # Empêche la mise en tampon par un proxy : sans cela le flux
+            # n'arrive qu'une fois la génération terminée.
             "X-Accel-Buffering": "no",
         },
     )

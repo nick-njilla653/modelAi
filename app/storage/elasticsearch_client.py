@@ -102,6 +102,7 @@ def _get_index_mapping() -> dict[str, Any]:
                 "doc_type": {"type": "keyword"},
                 "institution": {"type": "keyword"},
                 "jurisdiction": {"type": "keyword"},
+                "article_ref": {"type": "keyword"},
                 "page": {"type": "integer"},
                 "chunk_index": {"type": "integer"},
                 "ingested_at": {"type": "date"},
@@ -124,6 +125,27 @@ async def ensure_index() -> None:
             logger.debug("elasticsearch_index_exists", index=index_name)
     except Exception as exc:
         logger.error("elasticsearch_index_creation_failed", error=str(exc))
+        raise
+
+
+async def recreate_index() -> None:
+    """
+    Supprime puis recrée l'index BM25 avec le mapping courant.
+
+    Utilisé lors d'une évolution du mapping : un champ ajouté ne s'applique pas
+    aux documents déjà indexés, une réindexation complète est requise.
+    """
+    client = get_es_client()
+    settings = get_settings()
+    index_name = settings.elasticsearch_index_chunks
+    try:
+        if await client.indices.exists(index=index_name):
+            await client.indices.delete(index=index_name)
+            logger.warning("elasticsearch_index_deleted", index=index_name)
+        await client.indices.create(index=index_name, body=_get_index_mapping())
+        logger.info("elasticsearch_index_recreated", index=index_name)
+    except Exception as exc:
+        logger.error("elasticsearch_index_recreation_failed", error=str(exc))
         raise
 
 
@@ -243,6 +265,7 @@ async def search_bm25(
             "doc_type": src.get("doc_type", ""),
             "institution": src.get("institution", ""),
             "jurisdiction": src.get("jurisdiction", ""),
+            "article_ref": src.get("article_ref", ""),
             "sparse_score": hit["_score"],
         })
     return hits

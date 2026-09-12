@@ -8,8 +8,8 @@ Write-Host "=== Initialisation des modeles GOV-AI ===" -ForegroundColor Cyan
 Write-Host "`n[1/2] Telechargement du modele d'embedding (mxbai-embed-large)..." -ForegroundColor Yellow
 docker exec ollama ollama pull mxbai-embed-large
 
-Write-Host "`n[2/2] Telechargement du modele LLM (llama3.2)..." -ForegroundColor Yellow
-docker exec ollama ollama pull llama3.2
+Write-Host "`n[2/2] Telechargement du modele LLM (qwen2.5:7b-instruct)..." -ForegroundColor Yellow
+docker exec ollama ollama pull qwen2.5:7b-instruct
 
 Write-Host "`n=== Verification des modeles ===" -ForegroundColor Cyan
 docker exec ollama ollama list

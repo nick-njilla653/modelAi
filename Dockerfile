@@ -16,6 +16,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr \
     tesseract-ocr-fra \
     tesseract-ocr-eng \
+    # PDF → images (requis par pdf2image / extract_pdf_as_images)
+    poppler-utils \
+    # Lecture fichiers .doc ancienne génération (DatasetBuilder fine-tuning)
+    antiword \
     # Traitement d'images (libgl1 remplace libgl1-mesa-glx sur Debian >= Bullseye)
     libgl1 \
     libglib2.0-0 \
@@ -49,7 +53,9 @@ RUN mkdir -p \
     /app/eval/reports \
     /app/data \
     /app/metadata/chunks \
-    /app/metadata/chat_history
+    /app/metadata/chat_history \
+    /app/models/finetune_data \
+    /app/models/finetuned
 
 # ── Utilisateur non-root (sécurité) ───────────────────────────────────────────
 RUN useradd --no-create-home --shell /bin/false govai && \

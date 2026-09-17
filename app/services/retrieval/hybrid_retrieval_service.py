@@ -139,6 +139,58 @@ class HybridRetrievalService:
         )
         return retrieved_chunks
 
+    async def retrieve_stage(
+        self,
+        query: str,
+        stage: str,
+        depth: int = 20,
+        language: Optional[str] = None,
+    ) -> list[dict]:
+        """
+        Classement produit par une seule étape du pipeline, pour l'étude ablative.
+
+        `retrieve` n'expose que le résultat final : impossible d'y mesurer ce
+        qu'apporte chaque étape. Les baselines B0 à B3 du mémoire exigent
+        pourtant de comparer la recherche lexicale seule, la recherche dense
+        seule, leur fusion, puis la fusion reclassée. Cette méthode rejoue le
+        pipeline jusqu'à l'étape demandée — avec la même réécriture de requête
+        que `retrieve`, pour que la comparaison porte sur les étapes et non sur
+        les entrées.
+
+        Args:
+            stage: « bm25 » (B0), « dense » (B1), « rrf » (B2), « rerank » (B3).
+            depth: nombre de résultats conservés à chaque étape.
+
+        Returns:
+            Documents bruts ordonnés, porteurs de `chunk_id`.
+        """
+        expanded = self._expand_query_heuristic(query)
+
+        if stage == "bm25":
+            return await self._bm25.search(query=expanded, top_k=depth, language=language)
+        if stage == "dense":
+            return await self._dense_search(expanded, depth, None)
+
+        sparse, dense = await asyncio.gather(
+            self._bm25.search(query=expanded, top_k=depth, language=language),
+            self._dense_search(expanded, depth, None),
+        )
+        fused = merge_results_with_rrf(
+            dense_results=dense,
+            sparse_results=sparse,
+            top_k=depth,
+            k=self.settings.rrf_k,
+        )
+        if stage == "rrf":
+            return fused
+        if stage == "rerank":
+            if self._reranking_service is None or not fused:
+                raise RuntimeError("Reranker indisponible : la baseline B3 ne peut être mesurée.")
+            # Comme `retrieve`, le reranker reçoit la requête d'origine, non
+            # la requête réécrite.
+            return await self._reranking_service.rerank(query=query, chunks=fused, top_k=depth)
+        raise ValueError(f"Étape inconnue : {stage}")
+
     async def _dense_search(
         self,
         query: str,

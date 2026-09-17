@@ -5,10 +5,14 @@ Vérifie le chunking structurel et à taille fixe pour les documents juridiques 
 import pytest
 
 from app.services.ingestion.chunker import (
+    ChunkResult,
     chunk_document,
     chunk_fixed_size,
     chunk_structural,
     chunk_hybrid,
+    consolidate_article_chunks,
+    _extract_article_ref,
+    _is_header_only,
 )
 
 
@@ -166,3 +170,142 @@ class TestChunkDocument:
         )
         for chunk in chunks:
             assert chunk.metadata.get("doc_type") == "constitution"
+
+
+# ── Consolidation des articles coupés par une frontière de page ───────────────
+# Le chunking se fait page par page : un en-tête « Article 102 : » qui termine une
+# page est séparé de son corps, resté sur la page suivante.
+
+
+class TestExtractArticleRef:
+
+    @pytest.mark.parametrize("raw,expected", [
+        ("Article 103 : Le crime...", "Article 103"),
+        ("ARTICLE 103.- Le crime...", "Article 103"),
+        ("Art. 103 Le crime...", "Article 103"),
+        ("art 103 : Le crime...", "Article 103"),
+        ("Articles 12 et suivants", "Article 12"),
+        ("Section 12 : Definition", "Section 12"),
+        ("Article 5 bis : disposition ajoutee", "Article 5 bis"),
+        # Dispositions insérées : « Section 25-1 » et « Section 25-2 » sont
+        # distinctes de « Section 25 » — les confondre attribuerait un texte
+        # à la mauvaise disposition.
+        ("SECTION 1-1: No exemption", "Section 1-1"),
+        ("SECTION 26 -1: Reparatory sentence", "Section 26-1"),
+        ("SECTION 25 - 2: Dissolution", "Section 25-2"),
+    ])
+    def test_normalises_label(self, raw, expected):
+        assert _extract_article_ref(raw) == expected
+
+    def test_returns_none_without_header(self):
+        assert _extract_article_ref("(1) La procedure est secrete.") is None
+        assert _extract_article_ref("") is None
+
+
+class TestIsHeaderOnly:
+
+    @pytest.mark.parametrize("raw", [
+        "Article 102 :",
+        "Article 104 :\n(1)",
+        "ARTICLE 106.-",
+    ])
+    def test_detects_orphan_header(self, raw):
+        assert _is_header_only(raw)
+
+    @pytest.mark.parametrize("raw", [
+        "Article 105 : Les objets qui ne sont pas utiles a la manifestation de la verite sont restitues.",
+        "(1) La procedure durant l'enquete est secrete.",
+        "",
+    ])
+    def test_rejects_real_content(self, raw):
+        assert not _is_header_only(raw)
+
+
+class TestConsolidateArticleChunks:
+
+    @pytest.fixture
+    def split_across_pages(self):
+        """Séquence réelle observée dans le corpus (CPP, pages 42-43)."""
+        return [
+            ChunkResult(content="Article 101 :\n(1) L'officier de police judiciaire peut charger...",
+                        chunk_index=0, page=42, strategy="structural"),
+            ChunkResult(content="Article 102 :", chunk_index=1, page=42, strategy="structural"),
+            ChunkResult(content="(1) La procedure durant l'enquete de police judiciaire est secrete.",
+                        chunk_index=2, page=43, strategy="structural"),
+        ]
+
+    def test_merges_orphan_header_with_body(self, split_across_pages):
+        out = consolidate_article_chunks(split_across_pages)
+
+        assert len(out) == 2
+        assert out[1].content.startswith("Article 102 :")
+        assert "La procedure durant l'enquete" in out[1].content
+        assert out[1].article_ref == "Article 102"
+
+    def test_merged_chunk_keeps_header_page(self, split_across_pages):
+        """L'article commence à la page de son en-tête, pas à celle de son corps."""
+        out = consolidate_article_chunks(split_across_pages)
+        assert out[1].page == 42
+
+    def test_no_orphan_header_remains(self, split_across_pages):
+        out = consolidate_article_chunks(split_across_pages)
+        assert not any(_is_header_only(c.content) for c in out)
+
+    def test_chunk_index_is_recomputed(self, split_across_pages):
+        out = consolidate_article_chunks(split_across_pages)
+        assert [c.chunk_index for c in out] == [0, 1]
+
+    def test_continuation_inherits_marked_reference(self):
+        """Un corps qui déborde hérite de la référence, explicitement marquée."""
+        chunks = [
+            ChunkResult(content="Article 104 : Dispositions relatives au crime flagrant...",
+                        chunk_index=0, page=43, strategy="structural"),
+            ChunkResult(content="a) En cas de crime flagrant, l'officier avise informe le Procureur.",
+                        chunk_index=1, page=44, strategy="structural"),
+        ]
+        out = consolidate_article_chunks(chunks, language="fr")
+
+        assert out[0].article_ref == "Article 104"
+        assert out[1].article_ref == "Article 104 (suite)"
+
+    def test_continuation_suffix_follows_language(self):
+        chunks = [
+            ChunkResult(content="Section 104: Provisions on flagrant offences.",
+                        chunk_index=0, page=43, strategy="structural"),
+            ChunkResult(content="a) The judicial police officer shall inform the State Counsel.",
+                        chunk_index=1, page=44, strategy="structural"),
+        ]
+        out = consolidate_article_chunks(chunks, language="en")
+        assert out[1].article_ref == "Section 104 (cont.)"
+
+    def test_new_article_stops_propagation(self):
+        chunks = [
+            ChunkResult(content="Article 104 : Premier article avec du contenu.", chunk_index=0, page=43),
+            ChunkResult(content="Suite du premier article sans en-tete.", chunk_index=1, page=44),
+            ChunkResult(content="Article 105 : Second article avec du contenu.", chunk_index=2, page=44),
+        ]
+        out = consolidate_article_chunks(chunks)
+        assert [c.article_ref for c in out] == [
+            "Article 104", "Article 104 (suite)", "Article 105",
+        ]
+
+    def test_is_idempotent(self, split_across_pages):
+        """La reconstruction du corpus peut être rejouée sans dégrader les chunks."""
+        once = consolidate_article_chunks(split_across_pages)
+        twice = consolidate_article_chunks(list(once))
+
+        assert [c.content for c in twice] == [c.content for c in once]
+        assert [c.article_ref for c in twice] == [c.article_ref for c in once]
+
+    def test_empty_input(self):
+        assert consolidate_article_chunks([]) == []
+
+    def test_trailing_header_is_kept(self):
+        """En-tête en toute fin de document : aucun corps à lui rattacher."""
+        chunks = [
+            ChunkResult(content="Article 700 : Disposition finale du texte.", chunk_index=0, page=180),
+            ChunkResult(content="Article 701 :", chunk_index=1, page=181),
+        ]
+        out = consolidate_article_chunks(chunks)
+        assert len(out) == 2
+        assert out[1].article_ref == "Article 701"

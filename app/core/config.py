@@ -64,10 +64,17 @@ class Settings(BaseSettings):
     # ── LLM ──────────────────────────────────────────────────────────────────
     llm_provider: Literal["ollama", "openai-compatible"] = "ollama"
     llm_base_url: str = "http://localhost:11434"
-    llm_model: str = "llama3.2:latest"
+    llm_model: str = "qwen2.5:7b-instruct"
     llm_temperature: float = 0.1
-    llm_max_tokens: int = 512
-    llm_timeout: int = 300
+    llm_max_tokens: int = 2048
+    # Fenêtre de contexte explicite : doit couvrir prompt système + extraits + réponse.
+    # La valeur par défaut d'Ollama tronque silencieusement le prompt.
+    llm_num_ctx: int = 8192
+    llm_repeat_penalty: float = 1.1
+    # Doit couvrir llm_max_tokens au débit réel du modèle : un 7B sur CPU/GPU
+    # partiel tourne à ~2 tok/s, soit ~1000 s pour 2048 tokens. Un timeout plus
+    # court rend llm_max_tokens inatteignable et fait échouer la requête.
+    llm_timeout: int = 1200
     llm_stream: bool = True
 
     # ── Embedding ─────────────────────────────────────────────────────────────
@@ -122,9 +129,14 @@ class Settings(BaseSettings):
     session_history_max_turns: int = 5
 
     # ── Web Search Fallback (Sprint 3) ────────────────────────────────────────
-    web_search_enabled: bool = False   # opt-in (souveraineté numérique)
-    web_search_max_results: int = 3
-    web_search_region: str = "fr-FR"
+    # Activée : la recherche est restreinte à une liste blanche de sources
+    # officielles camerounaises (app/services/websearch/official_sources.py),
+    # ce qui lève l'objection de souveraineté qui justifiait l'opt-in.
+    web_search_enabled: bool = True
+    web_search_max_results: int = 5
+    # La région n'est plus configurable : « fr-FR » désigne la France et
+    # détournait la recherche vers ses administrations. Le service impose la
+    # région mondiale, seule à laisser remonter les domaines camerounais.
 
     # ── Évaluation ───────────────────────────────────────────────────────────
     eval_dataset_path: str = "./eval/datasets/qa_bilingual_annotated.json"

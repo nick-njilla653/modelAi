@@ -32,3 +32,16 @@ logs/
 .DS_Store
 .idea/
 .vscode/
+# Interface React (frontend/)
+node_modules/
+frontend/dist/
+
+# Données d'exécution du fine-tuning : corpus téléversés, sorties de jobs,
+# registre du modèle actif. 800+ Mo d'état local, régénéré à l'usage.
+/models/
+
+# Cache incrémental de TypeScript
+*.tsbuildinfo
+
+# Fichiers du mémoire (LaTeX et PDF) : hors du dépôt de code
+/Projet_M2_*

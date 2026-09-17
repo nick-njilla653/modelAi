@@ -93,6 +93,13 @@ class QueryRequest(BaseModel):
     filters: dict[str, Any] = Field(default_factory=dict)
     stream: bool = Field(default=False)
     include_chunks: bool = Field(default=True)
+    # Recherche web : None laisse le réglage global décider (déclenchement
+    # automatique si la confiance est basse), True/False force par requête —
+    # ce que l'interface expose sous forme de bouton.
+    web_search: Optional[bool] = Field(
+        default=None,
+        description="Force ou interdit la recherche web pour cette requête",
+    )
     session_context: Optional[str] = Field(
         default=None,
         max_length=4000,
@@ -137,13 +144,78 @@ class EvaluationRequest(BaseModel):
 
 # ── Réponses ──────────────────────────────────────────────────────────────────
 
+class WebSource(BaseModel):
+    """
+    Une page web officielle citée en complément du corpus.
+
+    Distincte de `Citation` : une citation renvoie au texte normatif indexé, une
+    source web à sa présentation par une institution. Les confondre laisserait
+    croire qu'une page ministérielle a la même valeur qu'un article de loi.
+    """
+    title: str
+    url: str
+    snippet: str = ""
+    domain: str
+    institution: str
+    acronym: str
+    #: 0 = institution suprême … 5 = presse publique.
+    priority: int = 1
+    #: Faux si le site ne répondait pas au dernier contrôle de disponibilité.
+    reachable: bool = True
+
+
+class GraphArticleRef(BaseModel):
+    """Une disposition désignée par le graphe, avec le texte dont elle relève."""
+    number: str
+    doc_title: str
+
+
+class GraphEvidence(BaseModel):
+    """
+    Ce que le graphe de connaissances a apporté à une réponse.
+
+    Distincte d'une `Citation` : une citation atteste un passage du corpus,
+    une pièce de graphe atteste une *relation* — entre deux dispositions, ou
+    entre une disposition et l'autorité qu'elle nomme. Les confondre
+    présenterait une déduction structurelle comme un extrait de texte, ce qui
+    est précisément l'erreur que l'ancrage cherche à empêcher.
+
+    Le champ `graph_evidence` de `QueryResponse` était déclaré depuis le
+    Sprint 2 mais n'a jamais été rempli : le graphe atteignait le modèle sans
+    que rien ne l'expose.
+    """
+    #: « institution » = autorité nommée ou déduite ; « article » = disposition
+    #: retrouvée par une entité de la question.
+    kind: str
+    label: str
+    #: Catégorie de l'institution, ou texte d'appartenance de l'article.
+    detail: Optional[str] = None
+    #: « passages » : déduit des dispositions retrouvées, sans décompte global.
+    #: « corpus » : l'entité est nommée dans la question, le décompte porte sur
+    #: tout le corpus indexé. La distinction évite d'annoncer « 66 articles »
+    #: à propos de cinq passages.
+    scope: Optional[str] = None
+    articles: list[GraphArticleRef] = Field(default_factory=list)
+    #: Nombre total dans la portée ; peut dépasser `len(articles)`, tronqué.
+    article_count: int = 0
+    #: Textes dont cette institution est l'émettrice, le cas échéant.
+    issued_texts: list[str] = Field(default_factory=list)
+
+
 class QueryResponse(BaseModel):
     """Réponse principale GOV-AI 2.0 — format standardisé."""
     query_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     answer: str
     citations: list[Citation] = Field(default_factory=list)
     retrieved_chunks: list[RetrievedChunk] = Field(default_factory=list)
-    graph_evidence: list[dict[str, Any]] = Field(default_factory=list)
+    web_sources: list[WebSource] = Field(
+        default_factory=list,
+        description="Pages officielles consultées sur le web, hors corpus indexé",
+    )
+    graph_evidence: list[GraphEvidence] = Field(
+        default_factory=list,
+        description="Relations apportées par le graphe, hors extraits cités",
+    )
     uncertainty_score: float = Field(..., ge=0.0, le=1.0)
     confidence_level: ConfidenceLevel = ConfidenceLevel.MEDIUM
     safety_flags: list[SafetyFlag] = Field(default_factory=list)
@@ -211,13 +283,86 @@ class MetricsResponse(BaseModel):
     dataset_size: int = 0
 
 
+class GraphVolumetry(BaseModel):
+    """
+    Ce que contient effectivement le graphe de connaissances.
+
+    « neo4j : ok » atteste une connexion, pas des données. Le graphe est resté
+    vide et connecté pendant toute la durée du Sprint 2, sans que rien ne le
+    signale. Ces compteurs distinguent les deux états.
+    """
+    texts: int = 0
+    articles: int = 0
+    references: int = 0
+    institutions: int = 0
+    mentions: int = 0
+    #: Textes cités par le corpus mais absents de celui-ci — le graphe sait
+    #: nommer ce qui lui manque.
+    external_texts: int = 0
+
+
 class HealthResponse(BaseModel):
     """Réponse du health check."""
     status: str
     version: str = "2.0.0-sprint3"
     services: dict[str, str] = Field(default_factory=dict)
     model: Optional[str] = None
+    #: Absente si Neo4j est injoignable — un compteur à zéro et une absence de
+    #: réponse ne se disent pas de la même façon.
+    graph: Optional[GraphVolumetry] = None
     timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
+# ── Conversations et corpus (interface) ───────────────────────────────────────
+
+class SessionSummary(BaseModel):
+    """Une conversation telle qu'elle apparaît dans la liste latérale."""
+    session_id: str
+    title: str = Field(..., description="Dérivé de la première question posée")
+    language: str = "fr"
+    profile: str = "citizen"
+    turns: int = 0
+    created_at: Optional[datetime] = None
+    last_active: Optional[datetime] = None
+
+
+class SessionTurn(BaseModel):
+    """Un tour de conversation : la question et la réponse qui lui a été faite."""
+    turn_id: str
+    query: str
+    answer: str
+    answer_truncated: bool = Field(
+        default=False,
+        description="Vrai pour les tours antérieurs à la persistance intégrale "
+                    "des réponses : seul un aperçu est disponible",
+    )
+    citations: list[dict[str, Any]] = Field(default_factory=list)
+    safety_flags: list[str] = Field(default_factory=list)
+    intent: Optional[str] = None
+    confidence: Optional[float] = None
+    latency_ms: Optional[float] = None
+    model_used: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+
+class SessionDetail(BaseModel):
+    """Transcription complète d'une conversation."""
+    session_id: str
+    title: str
+    language: str = "fr"
+    profile: str = "citizen"
+    created_at: Optional[datetime] = None
+    last_active: Optional[datetime] = None
+    turns: list[SessionTurn] = Field(default_factory=list)
+
+
+class CorpusDocument(BaseModel):
+    """Un document indexé, tel que présenté dans le panneau des sources."""
+    doc_id: str
+    source: str
+    language: str = "fr"
+    doc_type: Optional[str] = None
+    chunks: int = 0
 
 
 # ── Rétrocompatibilité v1 ─────────────────────────────────────────────────────

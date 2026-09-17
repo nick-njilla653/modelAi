@@ -10,6 +10,7 @@ Métriques clés (contraintes du mémoire) :
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -26,10 +27,17 @@ class GenerationMetrics:
     avg_citations_per_response: float = 0.0
     avg_response_length: float = 0.0
     refusal_rate: float = 0.0
+    # Fraction des mots-clés attendus présents dans la réponse. Seule mesure
+    # d'exactitude de ce module : les autres vérifient l'ancrage (la réponse
+    # s'appuie-t-elle sur les extraits ?), pas la justesse (dit-elle ce que
+    # dit le texte ?). Une réponse fidèle à un mauvais article serait bien
+    # notée par `faithfulness` et mal notée ici.
+    keyword_recall: float = 0.0
     num_responses: int = 0
 
     def to_dict(self) -> dict:
         return {
+            "keyword_recall": round(self.keyword_recall, 4),
             "faithfulness": round(self.faithfulness, 4),
             "citation_precision": round(self.citation_precision, 4),
             "hallucination_rate": round(self.hallucination_rate, 4),
@@ -138,6 +146,27 @@ def faithfulness_score(
     return anchored / len(sentences)
 
 
+def _fold(text: str) -> str:
+    """Minuscule, sans accents, espaces réduits : « Prorogée » = « prorogee »."""
+    decomposed = unicodedata.normalize("NFD", (text or "").lower())
+    stripped = "".join(c for c in decomposed if unicodedata.category(c) != "Mn")
+    return re.sub(r"\s+", " ", stripped).replace("’", "'")
+
+
+def keyword_recall_score(answer: str, gold_keywords: list[str]) -> float:
+    """
+    Fraction des mots-clés attendus retrouvés dans la réponse.
+
+    Les mots-clés sont tirés du texte de l'article de référence : une réponse
+    juste les reprend presque toujours. La comparaison ignore casse et accents,
+    le modèle écrivant parfois « prorogee » pour « prorogée ».
+    """
+    if not gold_keywords:
+        return 0.0
+    folded = _fold(answer)
+    return sum(1 for k in gold_keywords if _fold(k) in folded) / len(gold_keywords)
+
+
 def hallucination_rate(faithfulness: float) -> float:
     """Hallucination Rate = 1 - Faithfulness."""
     return max(0.0, 1.0 - faithfulness)
@@ -191,6 +220,8 @@ def aggregate_generation_metrics(
 
     fr_scores: list[float] = []
     en_scores: list[float] = []
+    keyword_total = 0.0
+    keyword_counted = 0
 
     for resp in responses:
         answer = resp.get("answer", "")
@@ -198,6 +229,15 @@ def aggregate_generation_metrics(
         sources = resp.get("retrieved_source_names", [])
         lang = resp.get("language", "fr")
         is_refusal = resp.get("is_refusal", False)
+
+        # Compté sur toutes les réponses, refus compris : un refus sur une
+        # question dont la réponse est au corpus est un échec, pas une abstention
+        # neutre. `faithfulness`, elle, exclut les refus — ne pas répondre
+        # n'hallucine rien.
+        gold = resp.get("gold_keywords")
+        if gold:
+            keyword_total += keyword_recall_score(answer, gold)
+            keyword_counted += 1
 
         if is_refusal:
             total_refusals += 1
@@ -217,9 +257,11 @@ def aggregate_generation_metrics(
         elif lang == "en":
             en_scores.append(faith)
 
+    keyword_recall = keyword_total / keyword_counted if keyword_counted else 0.0
+
     non_refusal = n - total_refusals
     if non_refusal == 0:
-        return GenerationMetrics(refusal_rate=1.0, num_responses=n)
+        return GenerationMetrics(refusal_rate=1.0, keyword_recall=keyword_recall, num_responses=n)
 
     avg_faith = total_faithfulness / non_refusal
     avg_cit = total_citation_precision / non_refusal
@@ -237,5 +279,6 @@ def aggregate_generation_metrics(
         avg_citations_per_response=total_citations / non_refusal,
         avg_response_length=total_length / non_refusal,
         refusal_rate=total_refusals / n,
+        keyword_recall=keyword_recall,
         num_responses=n,
     )

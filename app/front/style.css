@@ -115,6 +115,29 @@ body {
 .tab { display: none; flex-direction: column; height: 100%; overflow: hidden; }
 .tab.active { display: flex; }
 
+/* Conteneur scrollable générique sous le tab-header */
+.tab-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ── Scrollbars uniformes (WebKit + Firefox) ───────────────────────── */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--gray-300) transparent;
+}
+*::-webkit-scrollbar        { width: 6px; height: 6px; }
+*::-webkit-scrollbar-track  { background: transparent; }
+*::-webkit-scrollbar-thumb  {
+  background: var(--gray-300);
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-thumb:hover { background: var(--gray-400); }
+
 .tab-header {
   padding: 14px 20px;
   background: white;
@@ -637,7 +660,6 @@ body {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
-  padding: 16px;
 }
 .health-card {
   background: white;
@@ -666,9 +688,7 @@ body {
 .health-card.degraded .health-card-status { color: var(--warning); }
 .health-card.error    .health-card-status { color: var(--danger); }
 
-.health-raw {
-  margin: 0 16px 16px;
-}
+.health-raw { }
 .health-raw pre {
   background: var(--gray-50);
   border: 1px solid var(--gray-200);
@@ -728,3 +748,208 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--gray-200); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--gray-400); }
+
+/* ═══════════════════════════════════════════════════════════════════
+   ── TAB : FINE-TUNING
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* Layout principal : 2 colonnes */
+.ft-layout {
+  display: grid;
+  grid-template-columns: 380px 1fr;
+  gap: 20px;
+  align-items: start;
+}
+@media (max-width: 960px) {
+  .ft-layout { grid-template-columns: 1fr; }
+}
+.ft-left, .ft-right { display: flex; flex-direction: column; gap: 16px; }
+.ft-card { padding: 20px; }
+.ft-card h3 { font-size: .95rem; font-weight: 600; color: var(--gray-700); margin-bottom: 16px; }
+
+/* Upload info */
+.ft-upload-info { margin: 10px 0; }
+.ft-upload-stats {
+  display: flex; flex-wrap: wrap; gap: 10px; font-size: .82rem;
+  background: var(--success-light); border-radius: var(--radius-sm);
+  padding: 10px 14px; color: var(--success);
+}
+.badge-ok {
+  background: var(--success); color: white;
+  padding: 2px 10px; border-radius: 20px; font-size: .78rem;
+}
+
+/* Barre de progression */
+.ft-progress-bar-wrap {
+  height: 10px; background: var(--gray-100); border-radius: 5px;
+  overflow: hidden; margin: 8px 0;
+}
+.ft-progress-bar {
+  height: 100%; background: linear-gradient(90deg, var(--primary), #7c3aed);
+  border-radius: 5px; transition: width .4s ease;
+}
+.ft-progress-pct { font-size: .8rem; color: var(--gray-600); text-align: right; margin-bottom: 8px; }
+.ft-progress-log {
+  font-size: .78rem; font-family: monospace; color: var(--gray-600);
+  background: var(--gray-50); border-radius: var(--radius-sm);
+  padding: 8px; max-height: 120px; overflow-y: auto;
+}
+.ft-log-line { padding: 1px 0; border-bottom: 1px solid var(--gray-100); }
+
+/* Job list */
+.ft-job-list { display: flex; flex-direction: column; gap: 8px; }
+.ft-job-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 14px; background: var(--gray-50); border-radius: var(--radius-sm);
+  border-left: 3px solid var(--gray-200);
+}
+.ft-job-row.completed { border-left-color: var(--success); }
+.ft-job-row.failed    { border-left-color: var(--danger); }
+.ft-job-row.training  { border-left-color: var(--primary); }
+.ft-job-info { display: flex; flex-direction: column; gap: 4px; }
+.ft-job-meta { font-size: .75rem; color: var(--gray-600); }
+.ft-job-btns { display: flex; gap: 6px; }
+
+/* Modèles actifs */
+.ft-active-models { display: flex; flex-direction: column; gap: 8px; }
+.ft-model-row {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 8px 12px; background: var(--gray-50); border-radius: var(--radius-sm);
+  font-size: .83rem;
+}
+.ft-model-label { font-weight: 600; color: var(--gray-700); min-width: 90px; }
+.ft-model-val { color: var(--gray-600); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.badge-ft   { background: #7c3aed; color: white; padding: 2px 8px; border-radius: 20px; font-size: .72rem; }
+.badge-orig { background: var(--gray-400); color: white; padding: 2px 8px; border-radius: 20px; font-size: .72rem; }
+
+/* Option ingestion corpus */
+.ft-corpus-option {
+  background: var(--primary-light); border-radius: var(--radius-sm);
+  padding: 10px 12px; margin-bottom: 4px;
+}
+.ft-corpus-option small { color: var(--gray-600); display: block; margin-top: 4px; font-size: .75rem; }
+
+/* Alerte data leakage */
+.ft-warning {
+  display: flex; align-items: flex-start; gap: 10px;
+  background: var(--warning-light); border: 1px solid var(--warning);
+  border-radius: var(--radius-sm); padding: 12px; margin-bottom: 4px;
+  font-size: .8rem; color: var(--gray-700); line-height: 1.5;
+}
+.ft-warning i { color: var(--warning); flex-shrink: 0; margin-top: 2px; }
+.ft-warning strong { color: var(--warning); }
+.ft-warning code { background: rgba(0,0,0,.06); padding: 1px 4px; border-radius: 3px; font-size: .75rem; }
+
+/* ── Contrôles job : Cancel / Pause / Resume ─────────────────── */
+.ft-job-controls {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 12px; flex-wrap: wrap;
+}
+.btn-danger {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 14px; border-radius: var(--radius-sm); border: none;
+  background: #dc2626; color: #fff;
+  font-size: .82rem; font-weight: 600; cursor: pointer;
+  transition: background .2s;
+}
+.btn-danger:hover    { background: #b91c1c; }
+.btn-danger:disabled { background: var(--gray-300); cursor: not-allowed; }
+
+/* ── Rapport leakage dynamique ──────────────────────────────────── */
+.ft-leakage-report {
+  margin-top: 14px; border-radius: var(--radius-sm); overflow: hidden;
+  border: 1px solid var(--gray-200); font-size: .8rem;
+}
+.ft-leakage-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; background: var(--gray-50);
+  border-bottom: 1px solid var(--gray-200);
+}
+.ft-leakage-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 9px; border-radius: 999px;
+  font-size: .72rem; font-weight: 700; letter-spacing: .4px; white-space: nowrap;
+}
+.ft-leakage-badge.ok      { background: #dcfce7; color: #166534; }
+.ft-leakage-badge.warning { background: #fef9c3; color: #854d0e; }
+.ft-leakage-badge.danger  { background: #fee2e2; color: #991b1b; }
+.ft-leakage-details {
+  padding: 10px 12px; display: flex; flex-direction: column; gap: 6px;
+}
+.ft-leakage-row {
+  display: grid; grid-template-columns: 1fr auto auto auto;
+  align-items: center; gap: 8px; padding: 6px 8px;
+  background: var(--gray-50); border-radius: var(--radius-sm);
+  border: 1px solid var(--gray-100);
+}
+.ft-leakage-row .lk-query { color: var(--gray-700); font-size: .78rem; }
+.ft-leakage-lvl {
+  display: inline-block; padding: 1px 6px; border-radius: 999px;
+  font-size: .7rem; font-weight: 600; white-space: nowrap;
+}
+.ft-leakage-lvl.l1 { background: #fee2e2; color: #991b1b; }
+.ft-leakage-lvl.l2 { background: #fef9c3; color: #854d0e; }
+.ft-leakage-lvl.l3 { background: #ede9fe; color: #5b21b6; }
+.ft-leakage-empty { padding: 6px 8px; color: var(--gray-500); font-style: italic; }
+
+/* Boutons supplémentaires */
+.btn-sm {
+  font-size: .78rem; padding: 4px 10px; border-radius: var(--radius-sm);
+  background: var(--gray-100); border: 1px solid var(--gray-200);
+  cursor: pointer; color: var(--gray-700);
+  transition: background var(--transition);
+}
+.btn-sm:hover { background: var(--primary-light); color: var(--primary); }
+.btn-secondary {
+  background: var(--gray-100); color: var(--gray-700);
+  border: 1px solid var(--gray-200); padding: 8px 16px;
+  border-radius: var(--radius-sm); cursor: pointer; font-size: .85rem;
+  transition: background var(--transition);
+}
+.btn-secondary:hover { background: var(--gray-200); }
+
+/* Métriques grid */
+.ft-metrics-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px; margin-bottom: 20px;
+}
+.ft-metric-card {
+  background: var(--gray-50); border-radius: var(--radius-sm);
+  padding: 14px; text-align: center; border: 1px solid var(--gray-200);
+}
+.ft-metric-val { font-size: 1.4rem; font-weight: 700; color: var(--primary); }
+.ft-metric-label { font-size: .72rem; color: var(--gray-600); margin-top: 4px; }
+
+/* Charts */
+.ft-charts { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 20px; }
+.ft-chart-wrap {
+  flex: 1 1 280px; background: white; border-radius: var(--radius);
+  padding: 16px; border: 1px solid var(--gray-200); min-height: 240px;
+}
+
+/* Exemples réponses */
+.ft-samples { margin-top: 4px; }
+.ft-sample {
+  border: 1px solid var(--gray-200); border-radius: var(--radius);
+  padding: 14px; margin-bottom: 12px; background: var(--gray-50);
+}
+.ft-sample-q { font-weight: 600; margin-bottom: 10px; color: var(--gray-900); font-size: .88rem; }
+.ft-sample-answers { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 8px; }
+@media (max-width: 700px) { .ft-sample-answers { grid-template-columns: 1fr; } }
+.ft-sample-col { display: flex; flex-direction: column; gap: 6px; }
+.ft-sample-label {
+  font-size: .72rem; font-weight: 700; padding: 2px 8px;
+  border-radius: 20px; display: inline-block; width: fit-content;
+}
+.ft-sample-label.orig { background: var(--primary-light); color: var(--primary); }
+.ft-sample-label.fted { background: var(--success-light); color: var(--success); }
+.ft-sample-text {
+  font-size: .8rem; color: var(--gray-700); line-height: 1.5;
+  background: white; padding: 8px; border-radius: var(--radius-sm);
+  border: 1px solid var(--gray-200); max-height: 120px; overflow-y: auto;
+}
+.ft-sample-scores { font-size: .72rem; color: var(--gray-600); }
+.ft-sample-verdict {
+  font-size: .78rem; color: var(--gray-700);
+  border-top: 1px solid var(--gray-200); padding-top: 8px;
+}

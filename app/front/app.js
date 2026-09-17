@@ -189,9 +189,19 @@ const query = {
           const raw = line.slice(6);
 
           // Marqueurs spéciaux (non JSON)
-          if (raw.trim() === '[DONE]') return;
+          if (raw.trim() === '[DONE]') {
+            // Si aucun token reçu, vider la bulle (état indéfini → message d'erreur générique)
+            if (!started) {
+              bubble.textContent = 'Aucune réponse reçue. Vérifiez que le modèle LLM est chargé dans Ollama.';
+            }
+            return;
+          }
           if (raw.trim().startsWith('[ERROR]')) {
-            bubble.textContent = raw.trim();
+            const errMsg = raw.trim().replace(/^\[ERROR\]\s*/, '');
+            bubble.textContent = `⚠ ${errMsg}`;
+            bubble.style.color = 'var(--error, #dc2626)';
+            toast(errMsg, 'error');
+            started = true; // évite le message générique du [DONE]
             return;
           }
 
@@ -400,7 +410,7 @@ function renderAIResponse(aiEl, res) {
           <div>
             <div>
               <span class="citation-source">${escHtml(c.doc_title || c.source || '—')}</span>
-              ${c.article ? `<span class="citation-page"> · Art. ${escHtml(c.article)}</span>` : ''}
+              ${c.article ? `<span class="citation-page"> · ${escHtml(c.article)}</span>` : ''}
               ${c.page ? `<span class="citation-page"> · p. ${c.page}</span>` : ''}
               ${c.jurisdiction ? `<span class="citation-page"> · ${escHtml(c.jurisdiction)}</span>` : ''}
               ${relScore !== undefined ? `<span class="citation-score"> · ${(relScore*100).toFixed(0)}%</span>` : ''}
@@ -861,6 +871,712 @@ const health = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ── MODULE : FINE-TUNING ──────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+const ft = {
+  datasetId: null,
+  activeJobId: null,
+  ws: null,
+  charts: {},
+
+  init() {
+    // Upload zone
+    const dz = $('ftDropZone');
+    const fi = $('ftFileInput');
+    dz.addEventListener('click', () => fi.click());
+    dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
+    dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+    dz.addEventListener('drop', e => {
+      e.preventDefault(); dz.classList.remove('drag-over');
+      const f = e.dataTransfer.files[0];
+      if (f) this._setFile(f);
+    });
+    fi.addEventListener('change', () => { if (fi.files[0]) this._setFile(fi.files[0]); });
+    $('ftClearFile').addEventListener('click', () => this._clearFile());
+    $('btnFtUpload').addEventListener('click', () => this.upload());
+    $('btnFtStart').addEventListener('click', () => this.startJob());
+    $('btnFtApply').addEventListener('click', () => this.applyModel());
+    $('btnFtEvaluate').addEventListener('click', () => this._openEvalSection());
+    $('btnRollbackEmbedding').addEventListener('click', () => this.rollback('embedding'));
+    $('btnRollbackLlm').addEventListener('click', () => this.rollback('llm'));
+    $('btnRollbackReranker').addEventListener('click', () => this.rollback('reranker'));
+    $('btnRefreshJobs').addEventListener('click', () => this.loadJobs());
+    $('btnFtEvalStart').addEventListener('click', () => this.runEvaluation());
+    this.loadJobs();
+    this.loadActiveModels();
+  },
+
+  _setFile(f) {
+    $('ftFileName').textContent = f.name;
+    $('ftFilePreview').style.display = 'flex';
+    $('ftDropZone').style.display = 'none';
+    $('btnFtUpload').disabled = false;
+    this._selectedFile = f;
+  },
+
+  _clearFile() {
+    this._selectedFile = null;
+    this.datasetId = null;
+    $('ftFilePreview').style.display = 'none';
+    $('ftDropZone').style.display = 'flex';
+    $('btnFtUpload').disabled = true;
+    $('btnFtStart').disabled = true;
+    $('ftUploadResult').style.display = 'none';
+    $('ftFileInput').value = '';
+  },
+
+  async upload() {
+    if (!this._selectedFile) return;
+    const btn = $('btnFtUpload');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Upload en cours…';
+    try {
+      const fd = new FormData();
+      fd.append('file', this._selectedFile);
+      const r = await fetch(API.BASE + '/api/v1/finetune/upload', { method: 'POST', body: fd });
+      if (!r.ok) throw new Error((await r.json()).detail || 'Erreur upload');
+      const data = await r.json();
+      this.datasetId = data.dataset_id;
+      $('ftUploadResult').style.display = 'block';
+      $('ftUploadResult').innerHTML = `
+        <div class="ft-upload-stats">
+          <span><i class="fas fa-file-alt"></i> ${data.supported_files} fichier(s) supporté(s)</span>
+          <span><i class="fas fa-weight-hanging"></i> ${data.zip_size_mb} Mo</span>
+          <span class="badge-ok"><i class="fas fa-check"></i> ${data.message}</span>
+        </div>`;
+      $('btnFtStart').disabled = false;
+      toast(`Dossier analysé : ${data.supported_files} document(s) prêts`, 'success');
+    } catch (err) {
+      toast('Erreur upload : ' + err.message, 'error');
+      btn.disabled = false;
+    }
+    btn.innerHTML = '<i class="fas fa-cloud-upload-alt"></i> Analyser le dossier';
+  },
+
+  async startJob() {
+    if (!this.datasetId) return;
+    const target = $('ftTarget').value;
+    const mode   = $('ftMode').value;
+    const payload = {
+      name:           $('ftJobName').value || 'Fine-Tuning GOV-AI',
+      target,
+      dataset_id:     this.datasetId,
+      epochs:         parseInt($('ftEpochs').value) || 3,
+      batch_size:     parseInt($('ftBatch').value) || 16,
+      learning_rate:  parseFloat($('ftLr').value) || 2e-5,
+      pairs_per_chunk:parseInt($('ftPairsPerChunk').value) || 3,
+      lora_mode:      mode === 'lora',
+      ingest_corpus:  $('ftIngestCorpus').checked,
+    };
+    try {
+      const r = await fetch(API.BASE + '/api/v1/finetune/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!r.ok) throw new Error((await r.json()).detail || 'Erreur');
+      const data = await r.json();
+      this.activeJobId = data.job_id;
+      this._showProgressCard(data.job_id);
+      this._connectWs(data.job_id);
+      this.loadJobs();
+      toast('Entraînement lancé !', 'success');
+    } catch (err) {
+      toast('Erreur : ' + err.message, 'error');
+    }
+  },
+
+  _showProgressCard(jobId) {
+    const card = $('ftProgressCard');
+    card.style.display = 'block';
+    $('ftProgressBar').style.width = '0%';
+    $('ftProgressPct').textContent = '0%';
+    $('ftProgressLog').innerHTML = '';
+    $('ftProgressActions').style.display = 'none';
+    // Réinitialiser le rapport leakage et les flags d'affichage unique
+    const lkReport = $('ftLeakageReport');
+    if (lkReport) lkReport.style.display = 'none';
+    this._leakageShown = false;
+    this._corpusShown  = false;
+    // Réinitialiser le retry WebSocket et le polling éventuel
+    this._wsRetries = 0;
+    this._wsJobId   = null;
+    if (this._pollInterval) { clearInterval(this._pollInterval); this._pollInterval = null; }
+
+    // Afficher les boutons de contrôle et câbler les handlers
+    const controls = $('ftJobControls');
+    if (controls) {
+      controls.style.display = 'flex';
+      $('btnFtPause').style.display  = '';
+      $('btnFtResume').style.display = 'none';
+
+      $('btnFtCancel').onclick = async () => {
+        if (!confirm('Annuler le fine-tuning en cours ? Cette action est irréversible.')) return;
+        try {
+          await fetch(`${API.BASE}${API.V1}/finetune/jobs/${jobId}/cancel`, { method: 'POST' });
+          toast('Annulation demandée…', 'warning');
+        } catch { toast('Impossible d\'annuler (réseau)', 'error'); }
+      };
+      $('btnFtPause').onclick = async () => {
+        try {
+          await fetch(`${API.BASE}${API.V1}/finetune/jobs/${jobId}/pause`, { method: 'POST' });
+          toast('Mise en pause…', 'info');
+        } catch { toast('Impossible de mettre en pause', 'error'); }
+      };
+      $('btnFtResume').onclick = async () => {
+        try {
+          await fetch(`${API.BASE}${API.V1}/finetune/jobs/${jobId}/resume`, { method: 'POST' });
+          toast('Reprise en cours…', 'info');
+        } catch { toast('Impossible de reprendre', 'error'); }
+      };
+    }
+
+    card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  },
+
+  _connectWs(jobId) {
+    // Fermeture propre du WS précédent (évite "closed before established")
+    if (this.ws && this.ws.readyState !== WebSocket.CLOSED) {
+      this.ws.onclose = null; // désactive le retry de l'ancien WS
+      this.ws.close();
+    }
+
+    this._wsJobId   = jobId;
+    this._wsRetries = this._wsRetries || 0;
+
+    // URL dérivée de window.location → pas de cross-origin, Edge Tracking OK
+    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    const wsUrl = `${proto}://${window.location.host}/api/v1/finetune/progress/${jobId}`;
+
+    try {
+      this.ws = new WebSocket(wsUrl);
+    } catch (e) {
+      this._startPolling(jobId);
+      return;
+    }
+
+    this.ws.onopen = () => {
+      this._wsRetries = 0;
+      // Annuler le polling si on avait basculé dessus
+      if (this._pollInterval) { clearInterval(this._pollInterval); this._pollInterval = null; }
+    };
+
+    this.ws.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.ping) return;
+        this._updateProgress(data);
+      } catch { /* ignore JSON malformé */ }
+    };
+
+    this.ws.onerror = () => { /* géré dans onclose */ };
+
+    this.ws.onclose = () => {
+      if (this._wsJobId !== jobId) return; // job changé, ne pas retenter
+      if (this._wsRetries < 5) {
+        this._wsRetries++;
+        const delay = Math.min(500 * Math.pow(2, this._wsRetries), 15000);
+        setTimeout(() => this._connectWs(jobId), delay);
+      } else {
+        // 5 échecs → fallback polling REST
+        this._startPolling(jobId);
+      }
+    };
+  },
+
+  _startPolling(jobId) {
+    if (this._pollInterval) clearInterval(this._pollInterval);
+    toast('WebSocket indisponible — suivi en mode polling (3 s)', 'warning');
+    this._pollInterval = setInterval(async () => {
+      try {
+        const r = await fetch(`${API.BASE}${API.V1}/finetune/jobs/${jobId}`);
+        if (!r.ok) return;
+        const data = await r.json();
+        this._updateProgress(data);
+        if (['completed', 'failed', 'cancelled'].includes(data.status)) {
+          clearInterval(this._pollInterval);
+          this._pollInterval = null;
+        }
+      } catch { /* réseau temporairement indisponible */ }
+    }, 3000);
+  },
+
+  _updateProgress(job) {
+    const pct = Math.round(job.progress || 0);
+    $('ftProgressBar').style.width = pct + '%';
+    $('ftProgressPct').textContent = pct + '%';
+
+    const logs = job.logs || [];
+    if (logs.length) {
+      $('ftProgressLog').innerHTML = logs.slice(-6).map(l =>
+        `<div class="ft-log-line">${escHtml(l)}</div>`
+      ).join('');
+    }
+
+    // Affichage du statut d'ingestion corpus
+    if (job.corpus_ingestion && !this._corpusShown) {
+      this._corpusShown = true;
+      const ci = job.corpus_ingestion;
+      if (ci.error) {
+        toast(`Ingestion corpus partielle : ${ci.error}`, 'warning');
+      } else {
+        toast(`Corpus enrichi : ${ci.ingested} doc(s) → KG + Milvus + ES`, 'success');
+      }
+    }
+
+    // ── Rapport data leakage (affiché une seule fois quand il arrive) ────
+    if (job.leakage_report && !this._leakageShown) {
+      this._leakageShown = true;
+      this._renderLeakageReport(job.leakage_report, job.leakage_details || []);
+    }
+
+    // Affichage de la re-indexation Milvus (après apply embedding)
+    if (job._reindex_update) {
+      const reindexPct = job.reindex_progress || 0;
+      const reindexLog = job.reindex_log || '';
+      if (reindexPct < 100) {
+        toast(`Re-indexation Milvus : ${reindexPct}% — ${reindexLog}`, 'info', 4000);
+      } else if (job.reindex_status === 'completed') {
+        toast(`Milvus re-indexé : ${job.reindex_result?.reindexed || 0} vecteurs recalculés`, 'success');
+      }
+    }
+
+    // ── Boutons Cancel / Pause / Resume ──────────────────────────────────
+    const controls  = $('ftJobControls');
+    const pauseBtn  = $('btnFtPause');
+    const resumeBtn = $('btnFtResume');
+    const cancelBtn = $('btnFtCancel');
+    const activeStatuses = ['running', 'dataset_building', 'leakage_check', 'ingesting_corpus', 'training', 'cancelling'];
+
+    if (controls) {
+      const isActive = activeStatuses.includes(job.status);
+      const isPaused = job.status === 'paused';
+
+      controls.style.display = (isActive || isPaused) ? 'flex' : 'none';
+      if (pauseBtn)  pauseBtn.style.display  = isPaused ? 'none' : '';
+      if (resumeBtn) resumeBtn.style.display = isPaused ? '' : 'none';
+      if (cancelBtn) cancelBtn.disabled = job.status === 'cancelling';
+    }
+
+    if (job.status === 'completed') {
+      $('ftProgressCard').querySelector('h3').innerHTML =
+        '<i class="fas fa-check-circle" style="color:var(--success)"></i> Entraînement terminé !';
+      $('ftProgressActions').style.display = 'flex';
+      if (controls) controls.style.display = 'none';
+      if (job.result?.loss_history?.length) this._drawLossCurve(job.result.loss_history);
+      this.loadJobs();
+      this.loadActiveModels();
+    } else if (job.status === 'cancelled') {
+      $('ftProgressCard').querySelector('h3').innerHTML =
+        '<i class="fas fa-ban" style="color:var(--warning,#f59e0b)"></i> Fine-tuning annulé';
+      if (controls) controls.style.display = 'none';
+      if (this._pollInterval) { clearInterval(this._pollInterval); this._pollInterval = null; }
+      this._wsJobId = null;
+      toast('Fine-tuning annulé.', 'warning');
+    } else if (job.status === 'failed') {
+      $('ftProgressCard').querySelector('h3').innerHTML =
+        '<i class="fas fa-times-circle" style="color:var(--error)"></i> Échec du fine-tuning';
+      if (controls) controls.style.display = 'none';
+      toast('Erreur fine-tuning : ' + (job.error || 'inconnue'), 'error');
+    } else if (job.status === 'paused') {
+      $('ftProgressCard').querySelector('h3').innerHTML =
+        '<i class="fas fa-pause-circle" style="color:var(--primary)"></i> En pause — en attente de reprise';
+    }
+  },
+
+  _renderLeakageReport(summary, details) {
+    const el = $('ftLeakageReport');
+    if (!el) return;
+
+    const leaked  = summary.leaked  || 0;
+    const clean   = summary.clean   || 0;
+    const pct     = summary.leakage_pct || 0;
+    const levels  = (summary.levels_triggered || []).join(' · ') || 'aucun';
+    const warning = summary.warning || '';
+
+    // Sévérité
+    let severity = 'ok', icon = 'fa-shield-check', label = 'Aucun leakage';
+    if (warning) {
+      severity = 'warning'; icon = 'fa-triangle-exclamation'; label = 'Vérification ignorée';
+    } else if (pct > 30) {
+      severity = 'danger'; icon = 'fa-radiation'; label = `Leakage élevé (${pct}%)`;
+    } else if (pct > 0) {
+      severity = 'warning'; icon = 'fa-triangle-exclamation'; label = `Leakage partiel (${pct}%)`;
+    }
+
+    $('ftLeakageBadge').className = `ft-leakage-badge ${severity}`;
+    $('ftLeakageBadge').innerHTML = `<i class="fas ${icon}"></i> ${label}`;
+    $('ftLeakageSummaryText').textContent =
+      warning
+        ? warning
+        : `${leaked} paire(s) exclue(s) sur ${summary.total_train} · ${clean} propres · Niveaux : ${levels}`;
+
+    // Détails par question d'évaluation
+    const detailsEl = $('ftLeakageDetails');
+    if (!details.length) {
+      detailsEl.innerHTML = '<div class="ft-leakage-empty">Aucune question d\'évaluation affectée.</div>';
+    } else {
+      detailsEl.innerHTML = details.map(row => {
+        const l1 = row.level_1_source_matches   || 0;
+        const l2 = row.level_2_keyword_matches  || 0;
+        const l3 = row.level_3_semantic_matches || 0;
+        const lvlBadges = [
+          l1 ? `<span class="ft-leakage-lvl l1">L1 source ×${l1}</span>` : '',
+          l2 ? `<span class="ft-leakage-lvl l2">L2 mots-clés ×${l2}</span>` : '',
+          l3 ? `<span class="ft-leakage-lvl l3">L3 sémantique ×${l3}</span>` : '',
+        ].filter(Boolean).join(' ');
+        return `<div class="ft-leakage-row">
+          <span class="lk-query">[${escHtml(row.eval_query_id)}] ${escHtml(row.eval_query)}</span>
+          <span style="display:flex;gap:4px;flex-wrap:wrap">${lvlBadges}</span>
+        </div>`;
+      }).join('');
+    }
+
+    el.style.display = 'block';
+    if (pct > 0) toast(`Data leakage : ${leaked} paire(s) filtrée(s) (${pct}%)`, pct > 30 ? 'error' : 'warning');
+  },
+
+  async applyModel() {
+    if (!this.activeJobId) return;
+    try {
+      const r = await fetch(API.BASE + `/api/v1/finetune/apply/${this.activeJobId}`, { method: 'POST' });
+      if (!r.ok) throw new Error((await r.json()).detail || 'Erreur');
+      const data = await r.json();
+      toast(`Modèle intégré : ${data.applied}`, 'success');
+      this.loadActiveModels();
+    } catch (err) {
+      toast('Erreur intégration : ' + err.message, 'error');
+    }
+  },
+
+  async rollback(type) {
+    try {
+      const r = await fetch(API.BASE + `/api/v1/finetune/rollback/${type}`, { method: 'POST' });
+      if (!r.ok) throw new Error((await r.json()).detail || 'Aucun modèle précédent');
+      toast(`Rollback ${type} effectué`, 'info');
+      this.loadActiveModels();
+    } catch (err) {
+      toast(err.message, 'warning');
+    }
+  },
+
+  async loadJobs() {
+    try {
+      const data = await apiCall('/api/v1/finetune/jobs');
+      this._renderJobList(data.jobs || []);
+      this._populateEvalSelector(data.jobs || []);
+    } catch (err) {
+      $('ftJobList').innerHTML = '<p class="empty-hint">Erreur de chargement.</p>';
+    }
+  },
+
+  async loadActiveModels() {
+    try {
+      const data = await apiCall('/api/v1/finetune/active-models');
+      const row = (icon, label, val, isFt) => `
+        <div class="ft-model-row">
+          <span class="ft-model-label"><i class="fas fa-${icon}"></i> ${label}</span>
+          <span class="ft-model-val">${escHtml((val || '—').split('/').pop())}</span>
+          ${isFt ? '<span class="badge-ft">Fine-tuné</span>' : '<span class="badge-orig">Original</span>'}
+        </div>`;
+      $('ftActiveModels').innerHTML =
+        row('robot',         'LLM',       data.llm_model?.ollama_model_name,       !!data.llm_model?.job_id) +
+        row('vector-square', 'Embedding', data.embedding_model?.model_path,        !!data.embedding_model?.job_id) +
+        row('filter',        'Reranker',  data.reranker_model?.model_path,         !!data.reranker_model?.job_id);
+    } catch(e) {
+      $('ftActiveModels').innerHTML = '<p class="empty-hint">Erreur</p>';
+    }
+  },
+
+  _renderJobList(jobs) {
+    if (!jobs.length) {
+      $('ftJobList').innerHTML = '<p class="empty-hint">Aucun job pour l\'instant.</p>';
+      return;
+    }
+    $('ftJobList').innerHTML = jobs.map(j => `
+      <div class="ft-job-row ${j.status}">
+        <div class="ft-job-info">
+          <strong>${escHtml(j.name)}</strong>
+          <span class="ft-job-meta">
+            <i class="fas fa-tag"></i> ${j.target}
+            &nbsp;·&nbsp; <i class="fas fa-${_statusIcon(j.status)}"></i> ${j.status}
+            &nbsp;·&nbsp; ${Math.round(j.progress || 0)}%
+          </span>
+        </div>
+        <div class="ft-job-btns">
+          ${j.status === 'completed' ? `
+            <button class="btn-sm" onclick="ft._resumeJob('${j.id}', '${j.target}')">
+              <i class="fas fa-eye"></i> Voir
+            </button>` : ''}
+        </div>
+      </div>`).join('');
+  },
+
+  _resumeJob(jobId, _target) {
+    this.activeJobId = jobId;
+    $('ftProgressCard').style.display = 'block';
+    $('ftProgressBar').style.width = '100%';
+    $('ftProgressPct').textContent = '100%';
+    $('ftProgressCard').querySelector('h3').innerHTML =
+      '<i class="fas fa-check-circle" style="color:var(--success)"></i> Job complété';
+    $('ftProgressActions').style.display = 'flex';
+  },
+
+  _populateEvalSelector(jobs) {
+    const sel = $('ftEvalJobSelect');
+    const completed = jobs.filter(j => j.status === 'completed');
+    sel.innerHTML = completed.length
+      ? completed.map(j => `<option value="${j.id}">${escHtml(j.name)} (${j.target})</option>`).join('')
+      : '<option value="">Aucun job complété</option>';
+    $('ftEvalCard').style.display = completed.length ? 'block' : 'none';
+  },
+
+  _openEvalSection() {
+    $('ftEvalCard').scrollIntoView({ behavior: 'smooth' });
+  },
+
+  async runEvaluation() {
+    const jobId = $('ftEvalJobSelect').value;
+    if (!jobId) return;
+    $('btnFtEvalStart').disabled = true;
+    $('ftEvalSpinner').style.display = 'block';
+    $('ftMetricsSummary').style.display = 'none';
+    $('ftChartsContainer').style.display = 'none';
+    $('ftSampleResponses').style.display = 'none';
+
+    try {
+      // Lance l'évaluation
+      await fetch(API.BASE + `/api/v1/finetune/evaluate/${jobId}`, { method: 'POST' });
+      toast('Évaluation lancée, patientez…', 'info');
+
+      // Poll résultats toutes les 10s (max 3 min)
+      let attempts = 0;
+      const poll = setInterval(async () => {
+        attempts++;
+        try {
+          const r = await fetch(API.BASE + `/api/v1/finetune/evaluate/${jobId}/results`);
+          if (r.ok) {
+            clearInterval(poll);
+            const data = await r.json();
+            this._renderEvalResults(data);
+          } else if (attempts > 18) {
+            clearInterval(poll);
+            toast('Timeout évaluation', 'warning');
+          }
+        } catch(e) {}
+      }, 10000);
+
+    } catch (err) {
+      toast('Erreur : ' + err.message, 'error');
+    }
+    $('ftEvalSpinner').style.display = 'none';
+    $('btnFtEvalStart').disabled = false;
+  },
+
+  _renderEvalResults(data) {
+    const orig = data.original_metrics || {};
+    const ft   = data.finetuned_metrics || {};
+    const refs = data.reference_benchmarks || {};
+
+    // Métriques résumé
+    $('ftMetricsSummary').style.display = 'grid';
+    $('ftMetricsSummary').innerHTML = [
+      { label: 'BLEU (original)',        val: orig.mean_bleu        || 0 },
+      { label: 'BLEU (fine-tuné)',        val: ft.mean_bleu          || 0 },
+      { label: 'ROUGE-L (original)',      val: orig.mean_rouge_l     || 0 },
+      { label: 'ROUGE-L (fine-tuné)',     val: ft.mean_rouge_l       || 0 },
+      { label: 'Score juge (original)',   val: orig.mean_judge_score || 0 },
+      { label: 'Score juge (fine-tuné)', val: ft.mean_judge_score   || 0 },
+      { label: 'Win rate fine-tuné',      val: ft.win_rate           || 0 },
+      { label: 'Latence ms (fine-tuné)', val: ft.mean_latency_ms    || 0 },
+    ].map(m => `
+      <div class="ft-metric-card">
+        <div class="ft-metric-val">${typeof m.val === 'number' && m.val < 1 && m.val > 0 ? (m.val*100).toFixed(1)+'%' : Number(m.val).toFixed(m.label.includes('ms') ? 0 : 3)}</div>
+        <div class="ft-metric-label">${m.label}</div>
+      </div>`).join('');
+
+    $('ftChartsContainer').style.display = 'block';
+
+    // Bar chart BLEU + ROUGE-L
+    this._drawBarChart(orig, ft);
+
+    // Radar chart comparaison mondiale
+    this._drawRadarChart(orig, ft, refs, data.finetuned_model, data.original_model);
+
+    // Exemples de réponses
+    if (data.sample_responses?.length) {
+      this._renderSamples(data.sample_responses);
+    }
+  },
+
+  _drawBarChart(orig, ft) {
+    const ctx = $('chartBarMetrics').getContext('2d');
+    if (this.charts.bar) this.charts.bar.destroy();
+    this.charts.bar = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: ['BLEU', 'ROUGE-L', 'Score juge /10', 'Win rate'],
+        datasets: [
+          {
+            label: 'Modèle original',
+            backgroundColor: '#2563eb99',
+            data: [
+              (orig.mean_bleu || 0)*100,
+              (orig.mean_rouge_l || 0)*100,
+              (orig.mean_judge_score || 0)*10,
+              (orig.win_rate || 0)*100,
+            ],
+          },
+          {
+            label: 'Modèle fine-tuné',
+            backgroundColor: '#16a34a99',
+            data: [
+              (ft.mean_bleu || 0)*100,
+              (ft.mean_rouge_l || 0)*100,
+              (ft.mean_judge_score || 0)*10,
+              (ft.win_rate || 0)*100,
+            ],
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { position: 'top' }, title: { display: true, text: 'Métriques BLEU / ROUGE-L / Juge (%)' } },
+        scales: { y: { min: 0, max: 100 } },
+      },
+    });
+  },
+
+  _drawRadarChart(orig, ft, refs, ftModelName, origModelName) {
+    const ctx = $('chartRadarComparison').getContext('2d');
+    if (this.charts.radar) this.charts.radar.destroy();
+
+    const labels = ['BLEU', 'ROUGE-L', 'Score juge', 'Win rate', 'Vitesse'];
+    const normalize = (v, max) => Math.min(100, (v / max) * 100);
+
+    const datasets = [
+      {
+        label: origModelName || 'Original',
+        borderColor: '#2563eb',
+        backgroundColor: '#2563eb22',
+        data: [
+          normalize(orig.mean_bleu || 0, 1),
+          normalize(orig.mean_rouge_l || 0, 1),
+          normalize(orig.mean_judge_score || 0, 10),
+          normalize(orig.win_rate || 0, 1),
+          normalize(1000 / Math.max(orig.mean_latency_ms || 1000, 1), 1),
+        ],
+      },
+      {
+        label: ftModelName || 'Fine-tuné',
+        borderColor: '#16a34a',
+        backgroundColor: '#16a34a22',
+        data: [
+          normalize(ft.mean_bleu || 0, 1),
+          normalize(ft.mean_rouge_l || 0, 1),
+          normalize(ft.mean_judge_score || 0, 10),
+          normalize(ft.win_rate || 0, 1),
+          normalize(1000 / Math.max(ft.mean_latency_ms || 1000, 1), 1),
+        ],
+      },
+    ];
+
+    // Ajouter les modèles de référence
+    const refColors = { 'gpt-4o': '#10a37f', 'claude-3-5-sonnet': '#d97706', 'mistral-7b': '#7c3aed', 'llama3.2-3b': '#94a3b8' };
+    Object.entries(refs).forEach(([key, ref]) => {
+      datasets.push({
+        label: ref.label,
+        borderColor: ref.color || refColors[key] || '#94a3b8',
+        backgroundColor: (ref.color || '#94a3b8') + '11',
+        borderDash: [5, 5],
+        data: [
+          normalize(ref.mteb_score || 0, 1) * 0.8,
+          normalize(ref.rag_faithfulness || 0, 1) * 85,
+          normalize(ref.rag_answer_relevancy || 0, 1) * 10 / 1,
+          normalize(ref.rag_faithfulness || 0, 1) * 65,
+          60,
+        ],
+      });
+    });
+
+    this.charts.radar = new Chart(ctx, {
+      type: 'radar',
+      data: { labels, datasets },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { position: 'bottom', labels: { font: { size: 11 } } },
+          title: { display: true, text: 'Comparaison mondiale des modèles (valeurs normalisées)' },
+        },
+        scales: { r: { min: 0, max: 100, ticks: { stepSize: 20 } } },
+      },
+    });
+  },
+
+  _drawLossCurve(history) {
+    $('chartLossWrap').style.display = 'block';
+    const ctx = $('chartLossCurve').getContext('2d');
+    if (this.charts.loss) this.charts.loss.destroy();
+    this.charts.loss = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: history.map((_, i) => `Step ${i+1}`),
+        datasets: [{
+          label: 'Training loss',
+          data: history.map(h => h.loss ?? h.score),
+          borderColor: '#2563eb',
+          backgroundColor: '#2563eb22',
+          tension: 0.3,
+          fill: true,
+        }],
+      },
+      options: {
+        responsive: true,
+        plugins: { title: { display: true, text: 'Courbe de perte (Training Loss)' } },
+        scales: { y: { title: { display: true, text: 'Loss' } } },
+      },
+    });
+  },
+
+  _renderSamples(samples) {
+    $('ftSampleResponses').style.display = 'block';
+    $('ftSampleResponses').innerHTML = `
+      <h4 style="margin-bottom:12px"><i class="fas fa-comments"></i> Exemples de réponses générées</h4>
+      ${samples.map((s, i) => `
+        <div class="ft-sample">
+          <div class="ft-sample-q"><strong>Q${i+1} :</strong> ${escHtml(s.question)}</div>
+          <div class="ft-sample-answers">
+            <div class="ft-sample-col">
+              <div class="ft-sample-label orig">Original</div>
+              <div class="ft-sample-text">${escHtml(s.original_answer || '—')}</div>
+              <div class="ft-sample-scores">BLEU: ${((s.original_bleu||0)*100).toFixed(1)}% · Juge: ${s.judge_score_original}/10</div>
+            </div>
+            <div class="ft-sample-col">
+              <div class="ft-sample-label fted">Fine-tuné</div>
+              <div class="ft-sample-text">${escHtml(s.finetuned_answer || '—')}</div>
+              <div class="ft-sample-scores">BLEU: ${((s.finetuned_bleu||0)*100).toFixed(1)}% · Juge: ${s.judge_score_finetuned}/10</div>
+            </div>
+          </div>
+          <div class="ft-sample-verdict">
+            Vainqueur : <strong>${escHtml(s.judge_winner)}</strong> — ${escHtml(s.judge_justification||'')}
+          </div>
+        </div>`).join('')}`;
+  },
+};
+
+function _statusIcon(status) {
+  const icons = {
+    pending: 'clock',
+    dataset_building: 'database',
+    training: 'spinner fa-spin',
+    evaluating: 'flask',
+    completed: 'check-circle',
+    failed: 'times-circle',
+  };
+  return icons[status] || 'question';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
@@ -869,6 +1585,7 @@ document.addEventListener('DOMContentLoaded', () => {
   ingest.init();
   evalModule.init();
   health.init();
+  ft.init();
 
   // Adjust chat input row layout
   const bar = document.querySelector('.chat-input-bar');

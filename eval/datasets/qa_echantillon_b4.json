@@ -1,0 +1,181 @@
+{
+  "metadata": {
+    "dataset_name": "GOV-AI 2.0 — Échantillon pour l'évaluation de bout en bout (B4)",
+    "version": "2.0",
+    "created": "2026-09-17",
+    "created_by": "NJILLA TCHAGADICK NICOL EMMANUEL",
+    "institution": "ENSPY Yaoundé",
+    "language": "fr+en",
+    "corpus": [
+      "Code de Procédure Pénale (Loi n° 2005/007)",
+      "Code Pénal — version anglaise (Law No. 2016/007)"
+    ],
+    "num_queries": 8,
+    "method": "Questions rédigées à partir du texte des articles. Pertinence définie au niveau de l'article : tous ses passages, continuations comprises. Mots-clés attendus vérifiés présents dans le texte de référence. Réponses de référence non encore validées par un juriste.",
+    "sampling": "Échantillon systématique du jeu complet de 26 questions, fixé avant toute mesure : une question française sur quatre (fr01, fr05, fr09, fr13) et une anglaise sur trois (en01, en04, en07, en10). Retenu pour tenir le temps de calcul : environ 5 minutes par réponse sur le matériel actuel. Les baselines B0 à B3 portent sur les 26 questions.",
+    "parent_dataset": "eval/datasets/qa_bilingual_annotated.json"
+  },
+  "queries": [
+    {
+      "id": "fr01",
+      "language": "fr",
+      "profile": "citizen",
+      "domain": "enquete",
+      "query": "Qu'est-ce qu'un crime ou délit flagrant ?",
+      "relevant_articles": [
+        "Article 103"
+      ],
+      "relevant_chunk_ids": [
+        "c9b050e8-29ee-437e-8551-51b130c87462"
+      ],
+      "relevant_sources": [
+        "Code de Procédure Pénale (Loi n° 2005/007)"
+      ],
+      "gold_answer_keywords": [
+        "se commet actuellement",
+        "vient de se commettre",
+        "clameur publique"
+      ]
+    },
+    {
+      "id": "fr05",
+      "language": "fr",
+      "profile": "citizen",
+      "domain": "detention",
+      "query": "Quelle autorité peut décerner un mandat de détention provisoire ?",
+      "relevant_articles": [
+        "Article 218"
+      ],
+      "relevant_chunk_ids": [
+        "64be74e2-3bf4-4266-a6a0-c1c5b042aa91"
+      ],
+      "relevant_sources": [
+        "Code de Procédure Pénale (Loi n° 2005/007)"
+      ],
+      "gold_answer_keywords": [
+        "juge d'instruction"
+      ]
+    },
+    {
+      "id": "fr09",
+      "language": "fr",
+      "profile": "citizen",
+      "domain": "prescription",
+      "query": "Quels actes interrompent la prescription de l'action publique ?",
+      "relevant_articles": [
+        "Article 66"
+      ],
+      "relevant_chunk_ids": [
+        "c83f065a-4e18-49d2-8bea-171561b6da44"
+      ],
+      "relevant_sources": [
+        "Code de Procédure Pénale (Loi n° 2005/007)"
+      ],
+      "gold_answer_keywords": [
+        "dépôt d'une plainte",
+        "ministère public"
+      ]
+    },
+    {
+      "id": "fr13",
+      "language": "fr",
+      "profile": "citizen",
+      "domain": "cooperation",
+      "query": "Qui peut ordonner l'extradition d'un étranger ?",
+      "relevant_articles": [
+        "Article 641"
+      ],
+      "relevant_chunk_ids": [
+        "99ca9bcb-1667-432f-9fa5-9b025f178999"
+      ],
+      "relevant_sources": [
+        "Code de Procédure Pénale (Loi n° 2005/007)"
+      ],
+      "gold_answer_keywords": [
+        "président de la république",
+        "décret"
+      ]
+    },
+    {
+      "id": "en01",
+      "language": "en",
+      "profile": "citizen",
+      "domain": "offences_person",
+      "query": "What is the punishment for murder?",
+      "relevant_articles": [
+        "Section 275"
+      ],
+      "relevant_chunk_ids": [
+        "8182cc95-d007-4310-b70e-9a402bd02fa6"
+      ],
+      "relevant_sources": [
+        "Code Pénal — version anglaise (Law No. 2016/007)"
+      ],
+      "gold_answer_keywords": [
+        "imprisonment for life"
+      ]
+    },
+    {
+      "id": "en04",
+      "language": "en",
+      "profile": "citizen",
+      "domain": "offences_property",
+      "query": "When are the penalties for theft doubled?",
+      "relevant_articles": [
+        "Section 320"
+      ],
+      "relevant_chunk_ids": [
+        "f2349333-c409-463d-8fdd-5ceac128e795"
+      ],
+      "relevant_sources": [
+        "Code Pénal — version anglaise (Law No. 2016/007)"
+      ],
+      "gold_answer_keywords": [
+        "doubled",
+        "force",
+        "weapons"
+      ]
+    },
+    {
+      "id": "en07",
+      "language": "en",
+      "profile": "citizen",
+      "domain": "penalties",
+      "query": "Can a death sentence be executed without the President's decision?",
+      "relevant_articles": [
+        "Section 22"
+      ],
+      "relevant_chunk_ids": [
+        "04d5379a-31e3-4b28-8145-f7672bcf0a69"
+      ],
+      "relevant_sources": [
+        "Code Pénal — version anglaise (Law No. 2016/007)"
+      ],
+      "gold_answer_keywords": [
+        "president of the republic",
+        "commutation"
+      ]
+    },
+    {
+      "id": "en10",
+      "language": "en",
+      "profile": "citizen",
+      "domain": "offences_property",
+      "query": "What is arson under the Penal Code?",
+      "relevant_articles": [
+        "Section 227"
+      ],
+      "relevant_chunk_ids": [
+        "6ec6561b-a5d7-4686-9517-91fc2c8f77ba",
+        "5bec9fc6-a830-4063-b551-af71a50fc162"
+      ],
+      "relevant_sources": [
+        "Code Pénal — version anglaise (Law No. 2016/007)"
+      ],
+      "gold_answer_keywords": [
+        "sets fire",
+        "dwelling"
+      ]
+    }
+  ]
+}

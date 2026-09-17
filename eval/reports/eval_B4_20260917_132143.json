@@ -1,0 +1,365 @@
+{
+  "baseline_id": "B4",
+  "baseline_description": "Système complet : recherche B3, routage, graphe de connaissances, génération",
+  "mode": "end_to_end",
+  "timestamp": "2026-09-17T13:21:43.556373+00:00",
+  "dataset": "eval/datasets/qa_echantillon_b4.json",
+  "num_queries": 8,
+  "retrieval": {
+    "precision_at_k": {
+      "1": 0.875,
+      "3": 0.375,
+      "5": 0.225,
+      "10": 0.1125
+    },
+    "recall_at_k": {
+      "1": 0.8125,
+      "3": 1.0,
+      "5": 1.0,
+      "10": 1.0
+    },
+    "mrr": 0.9375,
+    "ndcg_at_k": {
+      "1": 0.875,
+      "3": 0.9539,
+      "5": 0.9539,
+      "10": 0.9539
+    },
+    "hit_rate_at_k": {
+      "1": 0.875,
+      "3": 1.0,
+      "5": 1.0,
+      "10": 1.0
+    },
+    "reranker_gain": 0.0,
+    "num_queries": 8,
+    "avg_retrieved": 5.0
+  },
+  "generation": {
+    "keyword_recall": 0.875,
+    "faithfulness": 0.5607,
+    "citation_precision": 1.0,
+    "hallucination_rate": 0.4393,
+    "isb": 0.5468,
+    "avg_citations_per_response": 2.38,
+    "avg_response_length": 724.4,
+    "refusal_rate": 0.0,
+    "num_responses": 8,
+    "meets_constraints": {
+      "citation_precision_ge_95pct": true,
+      "hallucination_rate_le_5pct": false,
+      "isb_ge_85pct": false
+    }
+  },
+  "system": {
+    "error_rate": 0.0,
+    "end_to_end": {
+      "p50_ms": 175766.0,
+      "p75_ms": 196269.7,
+      "p95_ms": 250615.5,
+      "p99_ms": 265280.9,
+      "mean_ms": 185568.6,
+      "min_ms": 147628.9,
+      "max_ms": 268947.3,
+      "count": 8,
+      "meets_constraints": {
+        "p50_le_5s": false,
+        "p95_le_15s": false
+      }
+    }
+  },
+  "constraints_met": {
+    "citation_precision_ge_95pct": true,
+    "hallucination_rate_le_5pct": false,
+    "isb_ge_85pct": false,
+    "p50_le_5s": false,
+    "p95_le_15s": false,
+    "error_rate_le_1pct": true
+  },
+  "per_query": [
+    {
+      "id": "fr01",
+      "language": "fr",
+      "query": "Qu'est-ce qu'un crime ou délit flagrant ?",
+      "relevant_articles": [
+        "Article 103"
+      ],
+      "gold_answer_keywords": [
+        "se commet actuellement",
+        "vient de se commettre",
+        "clameur publique"
+      ],
+      "first_relevant_rank": 1,
+      "retrieved_articles": [
+        "Article 103",
+        "Article 174",
+        "Article 118",
+        "Article 111",
+        "Article 104"
+      ],
+      "answer": "Un crime ou délit flagrant est défini comme suit :\n\n1. Il se commet actuellement ou vient de se commettre [Source: Code de Procédure Pénale (Loi n° 2005/007), Article 103, p. 43].\n\n2. Il y a aussi flagrance lorsque la personne est poursuivie par la clameur publique [Source: Code de Procédure Pénale (Loi n° 2005/007), Article 103, p. 43].\n\n3. Dans un temps très voisin de la commission de l'infraction, le suspect est trouvé en possession d'un objet ou présente une trace ou indice laissant penser qu'il a participé à la commission du crime ou du délit [Source: Code de Procédure Pénale (Loi n° 2005/007), Article 103, p. 43].\n\n4. Il y a également flagrance lorsqu'une personne requiert le Procureur de la République ou un officier de police judiciaire de constater un crime ou un délit commis dans une maison qu'elle occupe ou dont elle assure la surveillance [Source: Code de Procédure Pénale (Loi n° 2005/007), Article 103, p. 43].",
+      "cited_articles": [
+        "Article 103",
+        "Article 104"
+      ],
+      "keyword_recall": 1.0,
+      "faithfulness": 0.8,
+      "citation_precision": 1.0,
+      "refusal": false,
+      "action_plan": [
+        "HYBRID_RAG"
+      ],
+      "graph_evidence": 0,
+      "safety_flags": [],
+      "latency_ms": 268947.3
+    },
+    {
+      "id": "fr05",
+      "language": "fr",
+      "query": "Quelle autorité peut décerner un mandat de détention provisoire ?",
+      "relevant_articles": [
+        "Article 218"
+      ],
+      "gold_answer_keywords": [
+        "juge d'instruction"
+      ],
+      "first_relevant_rank": 1,
+      "retrieved_articles": [
+        "Article 218",
+        "Article 277",
+        "Article 461",
+        "Article 250",
+        "Article 221"
+      ],
+      "answer": "Selon l'extrait du Code de Procédure Pénale (Loi n° 2005/007), l'autorité qui peut décerner un mandat de détention provisoire est le Juge d'instruction. Plus précisément, l'article 218 stipule :\n\n(2) Le Juge d'instruction peut décerner mandat de détention provisoire à tout moment après l'inculpation, mais avant l'ordonnance de renvoi, pourvu que l'infraction soit passible d'une peine privative de liberté. Il prend de suite une ordonnance motivant sa décision de mise en détention provisoire. Cette ordonnance est notifiée au Procureur de la République et à l'inculpé.\n\n[Source: Code de Procédure Pénale (Loi n° 2005/007), art. 218, p. 82]",
+      "cited_articles": [
+        "Article 218",
+        "Article 221"
+      ],
+      "keyword_recall": 1.0,
+      "faithfulness": 0.8,
+      "citation_precision": 1.0,
+      "refusal": false,
+      "action_plan": [
+        "HYBRID_RAG",
+        "KNOWLEDGE_GRAPH"
+      ],
+      "graph_evidence": 4,
+      "safety_flags": [],
+      "latency_ms": 183994.8
+    },
+    {
+      "id": "fr09",
+      "language": "fr",
+      "query": "Quels actes interrompent la prescription de l'action publique ?",
+      "relevant_articles": [
+        "Article 66"
+      ],
+      "gold_answer_keywords": [
+        "dépôt d'une plainte",
+        "ministère public"
+      ],
+      "first_relevant_rank": 1,
+      "retrieved_articles": [
+        "Article 66",
+        "Article 67",
+        "Article 68",
+        "Article 65",
+        "Article 64"
+      ],
+      "answer": "Les actes qui interrompent la prescription de l'action publique sont les suivants : \n\n- Le dépôt d'une plainte [Source: Code de Procédure Pénale (Loi n° 2005/007), art. 66, p. 30].\n- Les instructions écrites du Ministère public prescrivant des mesures d'enquête.\n- Les exploits d'huissiers.\n- Les procès-verbaux d'enquête de police.\n- Les mandats de justice.\n- L'interrogatoire de l'inculpé, du prévenu ou de l'accusé.\n- L'audition de la partie civile, du civilement responsable, des témoins et de l'assureur à l'information judiciaire ou à l'audience.\n- Les jugements avant-dire-droit.\n- Les déclarations de recours [Source: Code de Procédure Pénale (Loi n° 2005/007), art. 66, p. 30].\n\nDe plus, ces actes interrompvent la prescription même à l'égard des personnes qui ne sont pas impliquées ou désignées dans ces actes [Source: Code de Procédure Pénale (Loi n° 2005/007), art. 67, p. 30].",
+      "cited_articles": [
+        "Article 66",
+        "Article 67",
+        "Article 68"
+      ],
+      "keyword_recall": 1.0,
+      "faithfulness": 0.8,
+      "citation_precision": 1.0,
+      "refusal": false,
+      "action_plan": [
+        "HYBRID_RAG"
+      ],
+      "graph_evidence": 0,
+      "safety_flags": [],
+      "latency_ms": 216570.9
+    },
+    {
+      "id": "fr13",
+      "language": "fr",
+      "query": "Qui peut ordonner l'extradition d'un étranger ?",
+      "relevant_articles": [
+        "Article 641"
+      ],
+      "gold_answer_keywords": [
+        "président de la république",
+        "décret"
+      ],
+      "first_relevant_rank": 1,
+      "retrieved_articles": [
+        "Article 641",
+        "Article 651",
+        "Article 635",
+        "Article 658",
+        "Article 657"
+      ],
+      "answer": "Selon l'article 641 du Code de Procédure Pénale (Loi n° 2005/007), le Président de la République peut ordonner l'extradition d'un étranger trouvé sur le territoire national, objet d'une poursuite pénale ou d'une condamnation à une peine privative de liberté dans l'État requérant. [Source: Code de Procédure Pénale (Loi n° 2005/007), art. 641, p. 17]",
+      "cited_articles": [
+        "Article 641"
+      ],
+      "keyword_recall": 0.5,
+      "faithfulness": 0.5,
+      "citation_precision": 1.0,
+      "refusal": false,
+      "action_plan": [
+        "HYBRID_RAG",
+        "KNOWLEDGE_GRAPH"
+      ],
+      "graph_evidence": 3,
+      "safety_flags": [],
+      "latency_ms": 159410.6
+    },
+    {
+      "id": "en01",
+      "language": "en",
+      "query": "What is the punishment for murder?",
+      "relevant_articles": [
+        "Section 275"
+      ],
+      "gold_answer_keywords": [
+        "imprisonment for life"
+      ],
+      "first_relevant_rank": 2,
+      "retrieved_articles": [
+        "Section 276",
+        "Section 275",
+        "Section 340",
+        "Section 267",
+        "Section 278"
+      ],
+      "answer": "According to the Code Pénal — version anglaise (Law No. 2016/007), the punishment for murder is as follows:\n\n- If the murder is premeditated, by poisoning, or with a view to trafficking the organs of the victim, or in the preparation, facilitation, or commission of a felony or misdemeanor, the offender shall be punished with death [Source: Code Pénal — version anglaise (Law No. 2016/007), Section 276, art. 1, p. 100].\n\n- In other cases, whoever causes another's death shall be punished with imprisonment for life [Source: Code Pénal — version anglaise (Law No. 2016/007), Section 275, art. 1, p. 100].",
+      "cited_articles": [
+        "Section 276",
+        "Section 275"
+      ],
+      "keyword_recall": 1.0,
+      "faithfulness": 0.4,
+      "citation_precision": 1.0,
+      "refusal": false,
+      "action_plan": [
+        "HYBRID_RAG"
+      ],
+      "graph_evidence": 0,
+      "safety_flags": [],
+      "latency_ms": 150956.1
+    },
+    {
+      "id": "en04",
+      "language": "en",
+      "query": "When are the penalties for theft doubled?",
+      "relevant_articles": [
+        "Section 320"
+      ],
+      "gold_answer_keywords": [
+        "doubled",
+        "force",
+        "weapons"
+      ],
+      "first_relevant_rank": 1,
+      "retrieved_articles": [
+        "Section 320",
+        "Section 298",
+        "Section 327 (cont.)",
+        "Section 277",
+        "Section 277"
+      ],
+      "answer": "The penalties for theft are doubled under specific circumstances as outlined in Section 320 of the Penal Code [Source: Code Pénal — version anglaise (Law No. 2016/007), Section 320, p. 118]. These include:\n\n1. If the theft was committed with force.\n2. If the theft involved bearing weapons.\n3. If the theft was carried out by breaking in, climbing in, or using a false key.\n4. If the theft was performed using a motor vehicle.\n5. If the theft resulted in death or grievous harm to another person (as provided for in Sections 277 and 279 of the Penal Code).\n\nAdditionally, penalties are doubled if the offender is a public servant or minister of religion [Source: Code Pénal — version anglaise (Law No. 2016/007), Section 298, p. 108], has authority over the victim or custody of them by law or custom [Source: Code Pénal — version anglaise (Law No. 2016/007), Section 298, p. 108], or if they have a co-contractor who is the owner of the infringed right [Source: Code Pénal — version anglaise (Law No. 2016/007), Section 327(31), p. 122].\n\nThe available corpus does not contain the elements required to answer whether penalties are doubled for other specific conditions or offenses related to theft.",
+      "cited_articles": [
+        "Section 320",
+        "Section 298",
+        "Section 327 (cont.)"
+      ],
+      "keyword_recall": 1.0,
+      "faithfulness": 0.5,
+      "citation_precision": 1.0,
+      "refusal": false,
+      "action_plan": [
+        "HYBRID_RAG"
+      ],
+      "graph_evidence": 0,
+      "safety_flags": [],
+      "latency_ms": 189502.7
+    },
+    {
+      "id": "en07",
+      "language": "en",
+      "query": "Can a death sentence be executed without the President's decision?",
+      "relevant_articles": [
+        "Section 22"
+      ],
+      "gold_answer_keywords": [
+        "president of the republic",
+        "commutation"
+      ],
+      "first_relevant_rank": 1,
+      "retrieved_articles": [
+        "Section 22",
+        "Section 23",
+        "Article 426",
+        "Article 471",
+        "Article 586"
+      ],
+      "answer": "According to the Code Pénal (Law No. 2016/007), Section 22(1) and (2), every sentence of death must be submitted to the President of the Republic for his decision on commutation before it can be executed. Execution cannot proceed until the President has signified his decision not to commute the sentence [Source: Code Pénal — version anglaise (Law No. 2016/007), Section 22, p. 9]. Therefore, a death sentence cannot be executed without the President's decision.",
+      "cited_articles": [
+        "Section 22",
+        "Section 23"
+      ],
+      "keyword_recall": 1.0,
+      "faithfulness": 0.4,
+      "citation_precision": 1.0,
+      "refusal": false,
+      "action_plan": [
+        "HYBRID_RAG"
+      ],
+      "graph_evidence": 0,
+      "safety_flags": [],
+      "latency_ms": 147628.9
+    },
+    {
+      "id": "en10",
+      "language": "en",
+      "query": "What is arson under the Penal Code?",
+      "relevant_articles": [
+        "Section 227"
+      ],
+      "gold_answer_keywords": [
+        "sets fire",
+        "dwelling"
+      ],
+      "first_relevant_rank": 1,
+      "retrieved_articles": [
+        "Section 227",
+        "Section 227 (cont.)",
+        "Section 267",
+        "Section 316",
+        "Section 115"
+      ],
+      "answer": "Arson is defined in Section 227 of the Penal Code [Source: Code Pénal — version anglaise (Law No. 2016/007), p. 82]. It involves setting fire to a place used for another's dwelling, any land, sea or air vehicle containing one or more persons, or a working mine and its surroundings. The perpetrator can be the owner of the property being set on fire.\n\nThe penalties for arson are imprisonment for three to ten years and a fine ranging from CFAF 5,000 to CFAF 4,000,000 [Source: Code Pénal — version anglaise (Law No. 2016/007), Section 227(1) and (2), p. 83]. Destruction of such property is punished in the same manner as arson [Source: Code Pénal — version anglaise (Law No. 2016/007), Section 227(2), p. 83].",
+      "cited_articles": [
+        "Section 227",
+        "Section 227 (cont.)"
+      ],
+      "keyword_recall": 0.5,
+      "faithfulness": 0.2857,
+      "citation_precision": 1.0,
+      "refusal": false,
+      "action_plan": [
+        "HYBRID_RAG",
+        "KNOWLEDGE_GRAPH"
+      ],
+      "graph_evidence": 0,
+      "safety_flags": [],
+      "latency_ms": 167537.3
+    }
+  ]
+}

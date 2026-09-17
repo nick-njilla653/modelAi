@@ -1,0 +1,553 @@
+{
+  "metadata": {
+    "dataset_name": "GOV-AI 2.0 — Jeu d'évaluation aligné sur le corpus indexé",
+    "version": "2.0",
+    "created": "2026-09-17",
+    "created_by": "NJILLA TCHAGADICK NICOL EMMANUEL",
+    "institution": "ENSPY Yaoundé",
+    "language": "fr+en",
+    "corpus": [
+      "Code de Procédure Pénale (Loi n° 2005/007)",
+      "Code Pénal — version anglaise (Law No. 2016/007)"
+    ],
+    "num_queries": 26,
+    "method": "Questions rédigées à partir du texte des articles. Pertinence définie au niveau de l'article : tous ses passages, continuations comprises. Mots-clés attendus vérifiés présents dans le texte de référence. Réponses de référence non encore validées par un juriste."
+  },
+  "queries": [
+    {
+      "id": "fr01",
+      "language": "fr",
+      "profile": "citizen",
+      "domain": "enquete",
+      "query": "Qu'est-ce qu'un crime ou délit flagrant ?",
+      "relevant_articles": [
+        "Article 103"
+      ],
+      "relevant_chunk_ids": [
+        "c9b050e8-29ee-437e-8551-51b130c87462"
+      ],
+      "relevant_sources": [
+        "Code de Procédure Pénale (Loi n° 2005/007)"
+      ],
+      "gold_answer_keywords": [
+        "se commet actuellement",
+        "vient de se commettre",
+        "clameur publique"
+      ]
+    },
+    {
+      "id": "fr02",
+      "language": "fr",
+      "profile": "citizen",
+      "domain": "enquete",
+      "query": "Un officier de police judiciaire peut-il effectuer une perquisition sans mandat ?",
+      "relevant_articles": [
+        "Article 93",
+        "Article 94"
+      ],
+      "relevant_chunk_ids": [
+        "4e35df29-51ee-444f-b78a-a2104daa0b47",
+        "62896fa9-17be-4c6f-a85e-828d2d522470"
+      ],
+      "relevant_sources": [
+        "Code de Procédure Pénale (Loi n° 2005/007)"
+      ],
+      "gold_answer_keywords": [
+        "mandat de perquisition",
+        "flagrant",
+        "consentement"
+      ]
+    },
+    {
+      "id": "fr03",
+      "language": "fr",
+      "profile": "citizen",
+      "domain": "police_judiciaire",
+      "query": "Qui a la qualité d'officier de police judiciaire ?",
+      "relevant_articles": [
+        "Article 79"
+      ],
+      "relevant_chunk_ids": [
+        "d00ab45e-3a59-4c2a-acbe-b40328b48879",
+        "8fb9f269-7ed7-49b5-94d6-b7bcbcf7a8e0"
+      ],
+      "relevant_sources": [
+        "Code de Procédure Pénale (Loi n° 2005/007)"
+      ],
+      "gold_answer_keywords": [
+        "gendarmerie",
+        "commissaires de police",
+        "officiers de police"
+      ]
+    },
+    {
+      "id": "fr04",
+      "language": "fr",
+      "profile": "citizen",
+      "domain": "detention",
+      "query": "Quelle est la durée maximale de la détention provisoire ?",
+      "relevant_articles": [
+        "Article 221"
+      ],
+      "relevant_chunk_ids": [
+        "0928dfef-3417-489c-89b1-78c3676496cf",
+        "81337104-cce0-4f3e-97e9-38876eb99384"
+      ],
+      "relevant_sources": [
+        "Code de Procédure Pénale (Loi n° 2005/007)"
+      ],
+      "gold_answer_keywords": [
+        "six (6) mois",
+        "prorogée",
+        "ordonnance motivée"
+      ]
+    },
+    {
+      "id": "fr05",
+      "language": "fr",
+      "profile": "citizen",
+      "domain": "detention",
+      "query": "Quelle autorité peut décerner un mandat de détention provisoire ?",
+      "relevant_articles": [
+        "Article 218"
+      ],
+      "relevant_chunk_ids": [
+        "64be74e2-3bf4-4266-a6a0-c1c5b042aa91"
+      ],
+      "relevant_sources": [
+        "Code de Procédure Pénale (Loi n° 2005/007)"
+      ],
+      "gold_answer_keywords": [
+        "juge d'instruction"
+      ]
+    },
+    {
+      "id": "fr06",
+      "language": "fr",
+      "profile": "citizen",
+      "domain": "detention",
+      "query": "Comment s'appelle l'acte qui retire un mandat de détention provisoire ?",
+      "relevant_articles": [
+        "Article 223"
+      ],
+      "relevant_chunk_ids": [
+        "1a947819-baf8-4d21-b46e-1bc6ec3dc197"
+      ],
+      "relevant_sources": [
+        "Code de Procédure Pénale (Loi n° 2005/007)"
+      ],
+      "gold_answer_keywords": [
+        "ordonnance de mise en liberté"
+      ]
+    },
+    {
+      "id": "fr07",
+      "language": "fr",
+      "profile": "citizen",
+      "domain": "prescription",
+      "query": "Quel est le délai de prescription de l'action publique en matière de contravention ?",
+      "relevant_articles": [
+        "Article 65"
+      ],
+      "relevant_chunk_ids": [
+        "65cc5007-301d-4d4b-bfe4-fac373a1b465",
+        "8b1bb30f-6dd1-4ac4-8650-c8a3e0990986"
+      ],
+      "relevant_sources": [
+        "Code de Procédure Pénale (Loi n° 2005/007)"
+      ],
+      "gold_answer_keywords": [
+        "une année"
+      ]
+    },
+    {
+      "id": "fr08",
+      "language": "fr",
+      "profile": "citizen",
+      "domain": "prescription",
+      "query": "Qu'est-ce que la prescription de l'action publique ?",
+      "relevant_articles": [
+        "Article 65"
+      ],
+      "relevant_chunk_ids": [
+        "65cc5007-301d-4d4b-bfe4-fac373a1b465",
+        "8b1bb30f-6dd1-4ac4-8650-c8a3e0990986"
+      ],
+      "relevant_sources": [
+        "Code de Procédure Pénale (Loi n° 2005/007)"
+      ],
+      "gold_answer_keywords": [
+        "extinction de l'action publique",
+        "non-exercice",
+        "délai"
+      ]
+    },
+    {
+      "id": "fr09",
+      "language": "fr",
+      "profile": "citizen",
+      "domain": "prescription",
+      "query": "Quels actes interrompent la prescription de l'action publique ?",
+      "relevant_articles": [
+        "Article 66"
+      ],
+      "relevant_chunk_ids": [
+        "c83f065a-4e18-49d2-8bea-171561b6da44"
+      ],
+      "relevant_sources": [
+        "Code de Procédure Pénale (Loi n° 2005/007)"
+      ],
+      "gold_answer_keywords": [
+        "dépôt d'une plainte",
+        "ministère public"
+      ]
+    },
+    {
+      "id": "fr10",
+      "language": "fr",
+      "profile": "citizen",
+      "domain": "voies_de_recours",
+      "query": "Quel est le délai pour faire appel d'un jugement contradictoire ?",
+      "relevant_articles": [
+        "Article 440"
+      ],
+      "relevant_chunk_ids": [
+        "5fcea9ad-7cbf-4723-810f-86299a41e5ab"
+      ],
+      "relevant_sources": [
+        "Code de Procédure Pénale (Loi n° 2005/007)"
+      ],
+      "gold_answer_keywords": [
+        "dix (10) jours",
+        "lendemain"
+      ]
+    },
+    {
+      "id": "fr11",
+      "language": "fr",
+      "profile": "citizen",
+      "domain": "libertes",
+      "query": "Quel juge est compétent pour une requête en habeas corpus ?",
+      "relevant_articles": [
+        "Article 584"
+      ],
+      "relevant_chunk_ids": [
+        "e6bc15cf-79c9-4635-be82-81af3e08a4a1"
+      ],
+      "relevant_sources": [
+        "Code de Procédure Pénale (Loi n° 2005/007)"
+      ],
+      "gold_answer_keywords": [
+        "grande instance",
+        "lieu d'arrestation"
+      ]
+    },
+    {
+      "id": "fr12",
+      "language": "fr",
+      "profile": "citizen",
+      "domain": "cooperation",
+      "query": "Qu'est-ce que l'extradition ?",
+      "relevant_articles": [
+        "Article 635"
+      ],
+      "relevant_chunk_ids": [
+        "8ca8bc20-1348-4024-a190-a4d8dae9a629"
+      ],
+      "relevant_sources": [
+        "Code de Procédure Pénale (Loi n° 2005/007)"
+      ],
+      "gold_answer_keywords": [
+        "étranger",
+        "autre etat",
+        "poursuites"
+      ]
+    },
+    {
+      "id": "fr13",
+      "language": "fr",
+      "profile": "citizen",
+      "domain": "cooperation",
+      "query": "Qui peut ordonner l'extradition d'un étranger ?",
+      "relevant_articles": [
+        "Article 641"
+      ],
+      "relevant_chunk_ids": [
+        "99ca9bcb-1667-432f-9fa5-9b025f178999"
+      ],
+      "relevant_sources": [
+        "Code de Procédure Pénale (Loi n° 2005/007)"
+      ],
+      "gold_answer_keywords": [
+        "président de la république",
+        "décret"
+      ]
+    },
+    {
+      "id": "fr14",
+      "language": "fr",
+      "profile": "citizen",
+      "domain": "jugement",
+      "query": "Comment le Tribunal de Première Instance est-il saisi ?",
+      "relevant_articles": [
+        "Article 290"
+      ],
+      "relevant_chunk_ids": [
+        "879cf128-1020-482b-9c87-302e4533bc53"
+      ],
+      "relevant_sources": [
+        "Code de Procédure Pénale (Loi n° 2005/007)"
+      ],
+      "gold_answer_keywords": [
+        "ordonnance de renvoi",
+        "citation directe"
+      ]
+    },
+    {
+      "id": "fr15",
+      "language": "fr",
+      "profile": "citizen",
+      "domain": "jugement",
+      "query": "À quel moment le tribunal peut-il consulter le casier judiciaire du prévenu ?",
+      "relevant_articles": [
+        "Article 312"
+      ],
+      "relevant_chunk_ids": [
+        "c01ac030-7c04-43b2-8c07-11d1305a6022"
+      ],
+      "relevant_sources": [
+        "Code de Procédure Pénale (Loi n° 2005/007)"
+      ],
+      "gold_answer_keywords": [
+        "casier judiciaire",
+        "coupable"
+      ]
+    },
+    {
+      "id": "en01",
+      "language": "en",
+      "profile": "citizen",
+      "domain": "offences_person",
+      "query": "What is the punishment for murder?",
+      "relevant_articles": [
+        "Section 275"
+      ],
+      "relevant_chunk_ids": [
+        "8182cc95-d007-4310-b70e-9a402bd02fa6"
+      ],
+      "relevant_sources": [
+        "Code Pénal — version anglaise (Law No. 2016/007)"
+      ],
+      "gold_answer_keywords": [
+        "imprisonment for life"
+      ]
+    },
+    {
+      "id": "en02",
+      "language": "en",
+      "profile": "citizen",
+      "domain": "offences_person",
+      "query": "What is capital murder?",
+      "relevant_articles": [
+        "Section 276"
+      ],
+      "relevant_chunk_ids": [
+        "b9ee349c-4417-4f39-94f0-0361ae421864"
+      ],
+      "relevant_sources": [
+        "Code Pénal — version anglaise (Law No. 2016/007)"
+      ],
+      "gold_answer_keywords": [
+        "premeditation",
+        "poisoning"
+      ]
+    },
+    {
+      "id": "en03",
+      "language": "en",
+      "profile": "citizen",
+      "domain": "offences_property",
+      "query": "How does the Penal Code define theft?",
+      "relevant_articles": [
+        "Section 318"
+      ],
+      "relevant_chunk_ids": [
+        "d49c6981-a187-4e6b-bc24-99f16e670930",
+        "edfbdb83-b7d3-4f85-988d-591b1f555a1d"
+      ],
+      "relevant_sources": [
+        "Code Pénal — version anglaise (Law No. 2016/007)"
+      ],
+      "gold_answer_keywords": [
+        "causes loss to another",
+        "removing his property"
+      ]
+    },
+    {
+      "id": "en04",
+      "language": "en",
+      "profile": "citizen",
+      "domain": "offences_property",
+      "query": "When are the penalties for theft doubled?",
+      "relevant_articles": [
+        "Section 320"
+      ],
+      "relevant_chunk_ids": [
+        "f2349333-c409-463d-8fdd-5ceac128e795"
+      ],
+      "relevant_sources": [
+        "Code Pénal — version anglaise (Law No. 2016/007)"
+      ],
+      "gold_answer_keywords": [
+        "doubled",
+        "force",
+        "weapons"
+      ]
+    },
+    {
+      "id": "en05",
+      "language": "en",
+      "profile": "citizen",
+      "domain": "offences_person",
+      "query": "What is the punishment for rape?",
+      "relevant_articles": [
+        "Section 296"
+      ],
+      "relevant_chunk_ids": [
+        "5eac1649-ab08-477d-b45a-5073ecfec261"
+      ],
+      "relevant_sources": [
+        "Code Pénal — version anglaise (Law No. 2016/007)"
+      ],
+      "gold_answer_keywords": [
+        "force or moral ascendency",
+        "5 (five)"
+      ]
+    },
+    {
+      "id": "en06",
+      "language": "en",
+      "profile": "citizen",
+      "domain": "penalties",
+      "query": "What are the principal penalties for natural persons?",
+      "relevant_articles": [
+        "Section 18"
+      ],
+      "relevant_chunk_ids": [
+        "4d638a5f-c9a9-422c-b035-51a9927c176a",
+        "9bfd786d-4515-4ac1-94d0-9e9476c20e02"
+      ],
+      "relevant_sources": [
+        "Code Pénal — version anglaise (Law No. 2016/007)"
+      ],
+      "gold_answer_keywords": [
+        "death penalty",
+        "imprisonment",
+        "fine"
+      ]
+    },
+    {
+      "id": "en07",
+      "language": "en",
+      "profile": "citizen",
+      "domain": "penalties",
+      "query": "Can a death sentence be executed without the President's decision?",
+      "relevant_articles": [
+        "Section 22"
+      ],
+      "relevant_chunk_ids": [
+        "04d5379a-31e3-4b28-8145-f7672bcf0a69"
+      ],
+      "relevant_sources": [
+        "Code Pénal — version anglaise (Law No. 2016/007)"
+      ],
+      "gold_answer_keywords": [
+        "president of the republic",
+        "commutation"
+      ]
+    },
+    {
+      "id": "en08",
+      "language": "en",
+      "profile": "citizen",
+      "domain": "offences_state",
+      "query": "What does Section 134 of the Penal Code punish as corruption?",
+      "relevant_articles": [
+        "Section 134"
+      ],
+      "relevant_chunk_ids": [
+        "04c29d15-5e08-48e0-8b55-406e80fd862a",
+        "3dddffbb-a3c4-4a21-b67d-89f1a576c7c3"
+      ],
+      "relevant_sources": [
+        "Code Pénal — version anglaise (Law No. 2016/007)"
+      ],
+      "gold_answer_keywords": [
+        "civil servant",
+        "solicits"
+      ]
+    },
+    {
+      "id": "en09",
+      "language": "en",
+      "profile": "citizen",
+      "domain": "offences_property",
+      "query": "What constitutes forgery of a private document?",
+      "relevant_articles": [
+        "Section 314"
+      ],
+      "relevant_chunk_ids": [
+        "2cf6d4dc-5c56-4297-8771-a7edeb49c367",
+        "9163bb35-139e-41d8-9236-3c744afc2c5c"
+      ],
+      "relevant_sources": [
+        "Code Pénal — version anglaise (Law No. 2016/007)"
+      ],
+      "gold_answer_keywords": [
+        "forges or alters",
+        "signatures"
+      ]
+    },
+    {
+      "id": "en10",
+      "language": "en",
+      "profile": "citizen",
+      "domain": "offences_property",
+      "query": "What is arson under the Penal Code?",
+      "relevant_articles": [
+        "Section 227"
+      ],
+      "relevant_chunk_ids": [
+        "6ec6561b-a5d7-4686-9517-91fc2c8f77ba",
+        "5bec9fc6-a830-4063-b551-af71a50fc162"
+      ],
+      "relevant_sources": [
+        "Code Pénal — version anglaise (Law No. 2016/007)"
+      ],
+      "gold_answer_keywords": [
+        "sets fire",
+        "dwelling"
+      ]
+    },
+    {
+      "id": "en11",
+      "language": "en",
+      "profile": "citizen",
+      "domain": "penalties",
+      "query": "Where must an offender under eighteen serve his sentence?",
+      "relevant_articles": [
+        "Section 29"
+      ],
+      "relevant_chunk_ids": [
+        "cd631b3e-c6ae-4f4a-ae54-6373bdb5df6f"
+      ],
+      "relevant_sources": [
+        "Code Pénal — version anglaise (Law No. 2016/007)"
+      ],
+      "gold_answer_keywords": [
+        "special establishment",
+        "separated"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,163 @@
+{
+  "timestamp": "2026-09-17T12:56:38.772986+00:00",
+  "num_queries": 26,
+  "dataset": "eval/datasets/qa_bilingual_annotated.json",
+  "baselines": [
+    {
+      "baseline_id": "B0",
+      "description": "BM25 seul (Elasticsearch)",
+      "mode": "retrieval",
+      "mrr": 0.6914,
+      "hit_rate_at_k": {
+        "1": 0.5769,
+        "3": 0.7692,
+        "5": 0.8462,
+        "10": 0.8846
+      },
+      "ndcg_at_k": {
+        "1": 0.5769,
+        "3": 0.6545,
+        "5": 0.6877,
+        "10": 0.6955
+      },
+      "recall_at_k": {
+        "1": 0.5192,
+        "3": 0.6923,
+        "5": 0.7692,
+        "10": 0.7885
+      },
+      "error_rate": 0.0,
+      "retrieval_latency": {
+        "p50_ms": 10.8,
+        "p75_ms": 12.1,
+        "p95_ms": 15.1,
+        "p99_ms": 15.6,
+        "mean_ms": 10.9,
+        "min_ms": 8.2,
+        "max_ms": 15.8,
+        "count": 26,
+        "meets_constraints": {
+          "p50_le_5s": true,
+          "p95_le_15s": true
+        }
+      }
+    },
+    {
+      "baseline_id": "B1",
+      "description": "Dense seul (mxbai-embed-large / Milvus)",
+      "mode": "retrieval",
+      "mrr": 0.6363,
+      "hit_rate_at_k": {
+        "1": 0.5,
+        "3": 0.6923,
+        "5": 0.9231,
+        "10": 0.9615
+      },
+      "ndcg_at_k": {
+        "1": 0.5,
+        "3": 0.5119,
+        "5": 0.6042,
+        "10": 0.6313
+      },
+      "recall_at_k": {
+        "1": 0.3846,
+        "3": 0.5577,
+        "5": 0.7692,
+        "10": 0.8462
+      },
+      "error_rate": 0.0,
+      "retrieval_latency": {
+        "p50_ms": 74.5,
+        "p75_ms": 109.8,
+        "p95_ms": 192.7,
+        "p99_ms": 255.0,
+        "mean_ms": 95.4,
+        "min_ms": 52.3,
+        "max_ms": 275.7,
+        "count": 26,
+        "meets_constraints": {
+          "p50_le_5s": true,
+          "p95_le_15s": true
+        }
+      }
+    },
+    {
+      "baseline_id": "B2",
+      "description": "Hybride BM25 + dense, fusion RRF, sans reranking",
+      "mode": "retrieval",
+      "mrr": 0.7077,
+      "hit_rate_at_k": {
+        "1": 0.5769,
+        "3": 0.8462,
+        "5": 0.9231,
+        "10": 0.9231
+      },
+      "ndcg_at_k": {
+        "1": 0.5769,
+        "3": 0.6472,
+        "5": 0.6915,
+        "10": 0.699
+      },
+      "recall_at_k": {
+        "1": 0.4808,
+        "3": 0.7115,
+        "5": 0.8077,
+        "10": 0.8269
+      },
+      "error_rate": 0.0,
+      "retrieval_latency": {
+        "p50_ms": 87.8,
+        "p75_ms": 92.6,
+        "p95_ms": 96.8,
+        "p99_ms": 103.5,
+        "mean_ms": 81.1,
+        "min_ms": 54.0,
+        "max_ms": 105.4,
+        "count": 26,
+        "meets_constraints": {
+          "p50_le_5s": true,
+          "p95_le_15s": true
+        }
+      }
+    },
+    {
+      "baseline_id": "B3",
+      "description": "B2 + reranking cross-encoder (bge-reranker-v2-m3)",
+      "mode": "retrieval",
+      "mrr": 0.9231,
+      "hit_rate_at_k": {
+        "1": 0.8462,
+        "3": 1.0,
+        "5": 1.0,
+        "10": 1.0
+      },
+      "ndcg_at_k": {
+        "1": 0.8462,
+        "3": 0.8673,
+        "5": 0.8673,
+        "10": 0.8744
+      },
+      "recall_at_k": {
+        "1": 0.7115,
+        "3": 0.8846,
+        "5": 0.8846,
+        "10": 0.9038
+      },
+      "error_rate": 0.0,
+      "retrieval_latency": {
+        "p50_ms": 82791.9,
+        "p75_ms": 123447.2,
+        "p95_ms": 193126.1,
+        "p99_ms": 245295.8,
+        "mean_ms": 104531.3,
+        "min_ms": 36974.7,
+        "max_ms": 262633.6,
+        "count": 26,
+        "meets_constraints": {
+          "p50_le_5s": false,
+          "p95_le_15s": false
+        }
+      }
+    }
+  ]
+}

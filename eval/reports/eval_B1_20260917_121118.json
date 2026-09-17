@@ -1,0 +1,502 @@
+{
+  "baseline_id": "B1",
+  "baseline_description": "Dense seul (mxbai-embed-large / Milvus)",
+  "mode": "retrieval",
+  "timestamp": "2026-09-17T12:11:18.720492+00:00",
+  "dataset": "eval/datasets/qa_bilingual_annotated.json",
+  "num_queries": 26,
+  "retrieval": {
+    "precision_at_k": {
+      "1": 0.5,
+      "3": 0.2436,
+      "5": 0.2,
+      "10": 0.1115
+    },
+    "recall_at_k": {
+      "1": 0.3846,
+      "3": 0.5577,
+      "5": 0.7692,
+      "10": 0.8462
+    },
+    "mrr": 0.6363,
+    "ndcg_at_k": {
+      "1": 0.5,
+      "3": 0.5119,
+      "5": 0.6042,
+      "10": 0.6313
+    },
+    "hit_rate_at_k": {
+      "1": 0.5,
+      "3": 0.6923,
+      "5": 0.9231,
+      "10": 0.9615
+    },
+    "reranker_gain": 0.0,
+    "num_queries": 26,
+    "avg_retrieved": 10.0
+  },
+  "generation": null,
+  "system": {
+    "error_rate": 0.0,
+    "retrieval": {
+      "p50_ms": 74.5,
+      "p75_ms": 109.8,
+      "p95_ms": 192.7,
+      "p99_ms": 255.0,
+      "mean_ms": 95.4,
+      "min_ms": 52.3,
+      "max_ms": 275.7,
+      "count": 26,
+      "meets_constraints": {
+        "p50_le_5s": true,
+        "p95_le_15s": true
+      }
+    }
+  },
+  "constraints_met": {},
+  "per_query": [
+    {
+      "id": "fr01",
+      "language": "fr",
+      "query": "Qu'est-ce qu'un crime ou délit flagrant ?",
+      "relevant_articles": [
+        "Article 103"
+      ],
+      "first_relevant_rank": 1,
+      "retrieved_articles": [
+        "Article 103",
+        "Article 104",
+        "Article 148 (suite)",
+        "Article 624 (suite)",
+        "Article 87"
+      ],
+      "latency_ms": 275.7
+    },
+    {
+      "id": "fr02",
+      "language": "fr",
+      "query": "Un officier de police judiciaire peut-il effectuer une perquisition sans mandat ?",
+      "relevant_articles": [
+        "Article 93",
+        "Article 94"
+      ],
+      "first_relevant_rank": 2,
+      "retrieved_articles": [
+        "Article 95",
+        "Article 93",
+        "Article 97",
+        "Article 85",
+        "Article 92"
+      ],
+      "latency_ms": 115.5
+    },
+    {
+      "id": "fr03",
+      "language": "fr",
+      "query": "Qui a la qualité d'officier de police judiciaire ?",
+      "relevant_articles": [
+        "Article 79"
+      ],
+      "first_relevant_rank": 3,
+      "retrieved_articles": [
+        "Article 84",
+        "Article 81",
+        "Article 79",
+        "Article 607",
+        "Article 78"
+      ],
+      "latency_ms": 156.9
+    },
+    {
+      "id": "fr04",
+      "language": "fr",
+      "query": "Quelle est la durée maximale de la détention provisoire ?",
+      "relevant_articles": [
+        "Article 221"
+      ],
+      "first_relevant_rank": 1,
+      "retrieved_articles": [
+        "Article 221",
+        "Article 218",
+        "Article 262",
+        "Article 238",
+        "Article 503 (suite)"
+      ],
+      "latency_ms": 191.6
+    },
+    {
+      "id": "fr05",
+      "language": "fr",
+      "query": "Quelle autorité peut décerner un mandat de détention provisoire ?",
+      "relevant_articles": [
+        "Article 218"
+      ],
+      "first_relevant_rank": 3,
+      "retrieved_articles": [
+        "Article 221",
+        "Article 230",
+        "Article 218",
+        "Article 220",
+        "Article 223"
+      ],
+      "latency_ms": 128.1
+    },
+    {
+      "id": "fr06",
+      "language": "fr",
+      "query": "Comment s'appelle l'acte qui retire un mandat de détention provisoire ?",
+      "relevant_articles": [
+        "Article 223"
+      ],
+      "first_relevant_rank": 4,
+      "retrieved_articles": [
+        "Article 221",
+        "Article 218",
+        "Article 238",
+        "Article 223",
+        "Article 235"
+      ],
+      "latency_ms": 103.4
+    },
+    {
+      "id": "fr07",
+      "language": "fr",
+      "query": "Quel est le délai de prescription de l'action publique en matière de contravention ?",
+      "relevant_articles": [
+        "Article 65"
+      ],
+      "first_relevant_rank": 1,
+      "retrieved_articles": [
+        "Article 65 (suite)",
+        "Article 69",
+        "Article 65",
+        "Article 68",
+        "Article 66"
+      ],
+      "latency_ms": 105.1
+    },
+    {
+      "id": "fr08",
+      "language": "fr",
+      "query": "Qu'est-ce que la prescription de l'action publique ?",
+      "relevant_articles": [
+        "Article 65"
+      ],
+      "first_relevant_rank": 4,
+      "retrieved_articles": [
+        "Article 69",
+        "Article 60",
+        "Article 62",
+        "Article 65",
+        "Article 65 (suite)"
+      ],
+      "latency_ms": 193.1
+    },
+    {
+      "id": "fr09",
+      "language": "fr",
+      "query": "Quels actes interrompent la prescription de l'action publique ?",
+      "relevant_articles": [
+        "Article 66"
+      ],
+      "first_relevant_rank": 7,
+      "retrieved_articles": [
+        "Article 69",
+        "Article 60",
+        "Article 65 (suite)",
+        "Article 62",
+        "Article 67"
+      ],
+      "latency_ms": 111.4
+    },
+    {
+      "id": "fr10",
+      "language": "fr",
+      "query": "Quel est le délai pour faire appel d'un jugement contradictoire ?",
+      "relevant_articles": [
+        "Article 440"
+      ],
+      "first_relevant_rank": 5,
+      "retrieved_articles": [
+        "Article 387",
+        "Article 435",
+        "Article 436",
+        "Article 350 (suite)",
+        "Article 440"
+      ],
+      "latency_ms": 97.3
+    },
+    {
+      "id": "fr11",
+      "language": "fr",
+      "query": "Quel juge est compétent pour une requête en habeas corpus ?",
+      "relevant_articles": [
+        "Article 584"
+      ],
+      "first_relevant_rank": 5,
+      "retrieved_articles": [
+        "Article 585",
+        "Article 140",
+        "Article 588",
+        "Article 114",
+        "Article 584"
+      ],
+      "latency_ms": 90.7
+    },
+    {
+      "id": "fr12",
+      "language": "fr",
+      "query": "Qu'est-ce que l'extradition ?",
+      "relevant_articles": [
+        "Article 635"
+      ],
+      "first_relevant_rank": 3,
+      "retrieved_articles": [
+        "Article 645 (suite)",
+        "Article 666",
+        "Article 635",
+        "Article 645",
+        "Article 662"
+      ],
+      "latency_ms": 55.5
+    },
+    {
+      "id": "fr13",
+      "language": "fr",
+      "query": "Qui peut ordonner l'extradition d'un étranger ?",
+      "relevant_articles": [
+        "Article 641"
+      ],
+      "first_relevant_rank": null,
+      "retrieved_articles": [
+        "Article 645 (suite)",
+        "Article 635",
+        "Article 666",
+        "Article 662",
+        "Article 645"
+      ],
+      "latency_ms": 86.7
+    },
+    {
+      "id": "fr14",
+      "language": "fr",
+      "query": "Comment le Tribunal de Première Instance est-il saisi ?",
+      "relevant_articles": [
+        "Article 290"
+      ],
+      "first_relevant_rank": 1,
+      "retrieved_articles": [
+        "Article 290",
+        "Article 293",
+        "Article 296",
+        "Article 289",
+        "Article 409"
+      ],
+      "latency_ms": 54.1
+    },
+    {
+      "id": "fr15",
+      "language": "fr",
+      "query": "À quel moment le tribunal peut-il consulter le casier judiciaire du prévenu ?",
+      "relevant_articles": [
+        "Article 312"
+      ],
+      "first_relevant_rank": 4,
+      "retrieved_articles": [
+        "Article 351",
+        "Article 324",
+        "Article 299",
+        "Article 312",
+        "Article 294"
+      ],
+      "latency_ms": 87.4
+    },
+    {
+      "id": "en01",
+      "language": "en",
+      "query": "What is the punishment for murder?",
+      "relevant_articles": [
+        "Section 275"
+      ],
+      "first_relevant_rank": 1,
+      "retrieved_articles": [
+        "Section 275",
+        "Section 276",
+        "Section 278",
+        "Section 340",
+        "Section 354 (cont.)"
+      ],
+      "latency_ms": 55.2
+    },
+    {
+      "id": "en02",
+      "language": "en",
+      "query": "What is capital murder?",
+      "relevant_articles": [
+        "Section 276"
+      ],
+      "first_relevant_rank": 1,
+      "retrieved_articles": [
+        "Section 276",
+        "Section 275",
+        "Section 84 (cont.)",
+        "Section 340",
+        "Section 103"
+      ],
+      "latency_ms": 61.6
+    },
+    {
+      "id": "en03",
+      "language": "en",
+      "query": "How does the Penal Code define theft?",
+      "relevant_articles": [
+        "Section 318"
+      ],
+      "first_relevant_rank": 4,
+      "retrieved_articles": [
+        "Section 320",
+        "Section 319 (cont.)",
+        "Section 118",
+        "Section 318",
+        "Section 214"
+      ],
+      "latency_ms": 58.2
+    },
+    {
+      "id": "en04",
+      "language": "en",
+      "query": "When are the penalties for theft doubled?",
+      "relevant_articles": [
+        "Section 320"
+      ],
+      "first_relevant_rank": 2,
+      "retrieved_articles": [
+        "Section 324 (cont.)",
+        "Section 320",
+        "Section 298",
+        "Section 190",
+        "Section 277"
+      ],
+      "latency_ms": 55.9
+    },
+    {
+      "id": "en05",
+      "language": "en",
+      "query": "What is the punishment for rape?",
+      "relevant_articles": [
+        "Section 296"
+      ],
+      "first_relevant_rank": 1,
+      "retrieved_articles": [
+        "Section 296",
+        "Section 346",
+        "Section 268-1",
+        "Section 356",
+        "Section 302-1"
+      ],
+      "latency_ms": 55.5
+    },
+    {
+      "id": "en06",
+      "language": "en",
+      "query": "What are the principal penalties for natural persons?",
+      "relevant_articles": [
+        "Section 18"
+      ],
+      "first_relevant_rank": 1,
+      "retrieved_articles": [
+        "Section 18",
+        "Section 19",
+        "Section 21 (cont.)",
+        "Section 88",
+        "Section 89"
+      ],
+      "latency_ms": 59.5
+    },
+    {
+      "id": "en07",
+      "language": "en",
+      "query": "Can a death sentence be executed without the President's decision?",
+      "relevant_articles": [
+        "Section 22"
+      ],
+      "first_relevant_rank": 1,
+      "retrieved_articles": [
+        "Section 22",
+        "Section 23",
+        "Article 82 (suite)",
+        "Article 586",
+        "Section 126"
+      ],
+      "latency_ms": 58.3
+    },
+    {
+      "id": "en08",
+      "language": "en",
+      "query": "What does Section 134 of the Penal Code punish as corruption?",
+      "relevant_articles": [
+        "Section 134"
+      ],
+      "first_relevant_rank": 1,
+      "retrieved_articles": [
+        "Section 134",
+        "Section 344",
+        "Section 134-1",
+        "Section 134-2",
+        "Section 30"
+      ],
+      "latency_ms": 54.8
+    },
+    {
+      "id": "en09",
+      "language": "en",
+      "query": "What constitutes forgery of a private document?",
+      "relevant_articles": [
+        "Section 314"
+      ],
+      "first_relevant_rank": 1,
+      "retrieved_articles": [
+        "Section 314",
+        "Section 205",
+        "Section 144",
+        "Section 315",
+        "Section 206"
+      ],
+      "latency_ms": 54.3
+    },
+    {
+      "id": "en10",
+      "language": "en",
+      "query": "What is arson under the Penal Code?",
+      "relevant_articles": [
+        "Section 227"
+      ],
+      "first_relevant_rank": 1,
+      "retrieved_articles": [
+        "Section 227",
+        "Section 267",
+        "Section 1",
+        "Section 21",
+        "Section 316"
+      ],
+      "latency_ms": 62.3
+    },
+    {
+      "id": "en11",
+      "language": "en",
+      "query": "Where must an offender under eighteen serve his sentence?",
+      "relevant_articles": [
+        "Section 29"
+      ],
+      "first_relevant_rank": 1,
+      "retrieved_articles": [
+        "Section 29",
+        "Section 38",
+        "Section 346",
+        "Section 347",
+        "Section 80"
+      ],
+      "latency_ms": 52.3
+    }
+  ]
+}
